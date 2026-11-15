@@ -39,37 +39,98 @@
   let tt;
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3200); }
 
-  // ---------- Look-up and show picking ----------
-  function currentLink() {
-    const raw = $('url').value.trim();
-    try { const u = new URL(raw); u.searchParams.set('lang', lang()); return u.toString(); } catch { return raw; }
+  // ---------- Views and history (15 Nov 2026) ----------
+  // Home, a show, the Sonarr picker and search results are views of this one page. Opening a show or a search adds a
+  // history entry, so the browser's Back returns to Home where you were on it and Forward opens the show again. Each
+  // entry keeps its own scroll position (the browser's own restoring cannot be used: the view is swapped after it runs).
+  let link = '', view = 'home';
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  try { history.scrollRestoration = 'manual'; } catch { /* an old browser: it keeps its own restoring */ }
+  const keepScroll = () => { try { history.replaceState({ ...(history.state || {}), y: Math.round(scrollY) }, ''); } catch { /* not kept */ } };
+  if ('onscrollend' in window) addEventListener('scrollend', keepScroll);
+  else { let t; addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(keepScroll, 150); }, { passive: true }); }
+  const rowOf = (slug) => [...$('followedlist').children].find((el) => el.dataset.key === slug) || null;
+  const withLang = (raw) => { try { const u = new URL(raw); u.searchParams.set('lang', lang()); return u.toString(); } catch { return raw; } };
+  // Swap the view. From or to a row of the home list, the row's poster and title glide into the show's header and
+  // back (a view transition), where the browser can do it and motion is allowed; otherwise the swap is instant.
+  // The row is found by its show's slug, before and after the swap: the home list may have been redrawn in between.
+  function glide(change, slug, after) {
+    const marked = [];
+    const mark = () => {
+      const row = slug ? rowOf(slug) : null;
+      for (const [sel, name] of [['.poster', 'vt-poster'], ['.fname', 'vt-title']]) { const el = row?.querySelector(sel); if (el) { el.style.viewTransitionName = name; marked.push(el); } }
+    };
+    const done = () => { for (const el of marked) el.style.viewTransitionName = ''; if (after) after(slug ? rowOf(slug) : null); };
+    if (!document.startViewTransition || reduce.matches) { change(); done(); return; }
+    mark();
+    let t;
+    try { t = document.startViewTransition(() => { change(); mark(); }); } catch { change(); done(); return; }
+    t.finished.then(done, done);
   }
-  async function lookup(extra = '') {
-    const link = $('url').value.trim();
-    if (!link) return;
-    $('empty').hidden = true; $('found').hidden = true;
-    status('Looking it up in Sonarr…');
-    try { show = await api('GET', `/show?url=${encodeURIComponent(link)}${extra}`); }
-    catch (e) { status(`Could not look that up: ${e.message}`, true); return; }
-    status('');
-    history.replaceState(null, '', '?url=' + encodeURIComponent(link));
-    if (show.series) remember(show.slug, show.series.title);
-    $('sclear').hidden = false; $('skey').hidden = true;
-    $('map').classList.add('fresh'); setTimeout(() => $('map').classList.remove('fresh'), 900);
-    if (show.language) setSeg('lang', show.language);
-    if (!show.series) {
-      showPicker(show.candidates, show.candidates.length
-        ? `More than one show in Sonarr could be "${show.slug}". Pick the right one; it is remembered for this link.`
-        : `"${show.slug}" is not in Sonarr yet. Add the show in Sonarr first (http://${location.hostname}:8989/add/new), then look it up again, or search below if Sonarr has it under another name.`);
+  function showHome() {
+    view = 'home'; show = null; link = ''; sel.clear(); fills = new Map();
+    $('show').hidden = true; $('picker').hidden = true; $('found').hidden = true; $('run').hidden = true; $('bar').classList.remove('on');
+    $('empty').hidden = false; status(''); setTrail(''); hideTip();
+    document.title = BASE_TITLE;
+    renderHome();
+  }
+  function toHash(hash) {
+    if (hash === '#queue') openQueue(true);
+    else if (hash === '#attention' && !$('attention').hidden) $('attention').scrollIntoView({ block: 'start' });
+  }
+  function goHome(o = {}) {
+    if (view === 'home') {
+      if (o.hash) toHash(o.hash); else if (o.pop) scrollTo(0, o.y || 0); else scrollTo({ top: 0, behavior: reduce.matches ? 'auto' : 'smooth' });
       return;
     }
-    $('picker').hidden = true;
-    setSeg('numbering', String(!!show.absolute));
-    setFollow(!!show.follow);
-    renderShow();
-    await poll();
+    if (o.push !== false) { keepScroll(); history.pushState({ v: 'home' }, '', location.pathname + (o.hash || '')); }
+    glide(() => { showHome(); if (o.hash) toHash(o.hash); else scrollTo(0, o.y || 0); }, show?.slug,
+      (row) => { if (!o.hash) (row?.querySelector('a') || $('pagetitle')).focus({ preventScroll: true }); });
+  }
+
+  // ---------- Look-up and show picking ----------
+  // o.extra: more for the server (&seriesId=, &absolute=). o.push false: no new history entry (a first load, Back or
+  // Forward, the same show again). o.y: where to scroll to (0 for a newly opened show). o.key: the home row it opens from.
+  async function openShow(to, o = {}) {
+    to = String(to || '').trim();
+    if (!to) return;
+    const cold = $('empty').hidden && $('show').hidden && $('found').hidden && $('picker').hidden;   // nothing on screen yet: say what is happening
+    if (cold) status('Looking it up in Sonarr…');
+    let got;
+    try { got = await api('GET', `/show?url=${encodeURIComponent(to)}${o.extra || ''}`); }
+    catch (e) { status(`Could not look that up: ${e.message}`, true); return; }
+    status('');
+    const url = '?url=' + encodeURIComponent(to);
+    const same = view === 'show' && !!show?.series && got.series?.id === show.series.id;   // this show again (its numbering, a finished run): stay put
+    if (o.push !== false && location.search !== url) { keepScroll(); history.pushState({ v: 'show', home: view === 'home' }, '', url); }
+    else if (!o.pop && location.search !== url) history.replaceState({ ...(history.state || {}), v: 'show' }, '', url);
+    const change = () => {
+      show = got; link = to;
+      if (show.series) remember(show.slug, show.series.title);
+      $('url').value = ''; $('sclear').hidden = true; $('skey').hidden = false;
+      $('map').classList.add('fresh'); setTimeout(() => $('map').classList.remove('fresh'), 900);
+      if (show.language) setSeg('lang', show.language);
+      $('empty').hidden = true; $('found').hidden = true;
+      if (!show.series) {
+        showPicker(show.candidates, show.candidates.length
+          ? `More than one show in Sonarr could be "${show.slug}". Pick the right one; it is remembered for this link.`
+          : `"${show.slug}" is not in Sonarr yet. Add the show in Sonarr first (http://${location.hostname}:8989/add/new), then look it up again, or search below if Sonarr has it under another name.`);
+      } else {
+        view = 'show';
+        $('picker').hidden = true;
+        setSeg('numbering', String(!!show.absolute));
+        setFollow(!!show.follow);
+        if (!same && !cold) $('show').hidden = false;   // the glide is the entrance; the rise is for a first load
+        renderShow();
+        poll();
+      }
+      if (!same) scrollTo(0, o.y || 0);
+    };
+    if (same) change();
+    else glide(change, view === 'home' ? o.key || got.slug : null, () => { if (!cold && got.series) $('title').focus({ preventScroll: true }); });
   }
   function showPicker(cands, hint) {
+    view = 'picker';
     $('show').hidden = true; $('empty').hidden = true; $('picker').hidden = false;
     setTrail('Which show in Sonarr?');
     $('pickhint').textContent = hint;
@@ -80,7 +141,7 @@
     $('picks').innerHTML = list.length ? list.map((s) => `<li><button type="button" data-id="${s.id}">${esc(s.title)} <span>${esc(s.year)} · ${esc(s.path)}</span></button></li>`).join('')
       : '<li class="hint">Nothing in Sonarr matches. Search by another name.</li>';
   }
-  $('picks').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-id]'); if (b) lookup('&seriesId=' + b.dataset.id); });
+  $('picks').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-id]'); if (b) openShow(link, { extra: '&seriesId=' + b.dataset.id, push: false }); });
   $('search').addEventListener('keydown', (ev) => { if (ev.key === 'ArrowDown') { ev.preventDefault(); $('picks').querySelector('button')?.focus(); } });
   $('picks').addEventListener('keydown', (ev) => {
     const b = ev.target.closest('button'); if (!b) return;
@@ -91,7 +152,7 @@
   let st;
   $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(async () => renderPicks(await api('GET', '/series-search?q=' + encodeURIComponent($('search').value)).catch(() => [])), 250); });
   $('change').onclick = () => showPicker(show?.candidates, 'Pick the series these episodes belong to. It is remembered for this link.');
-  $('lookup').addEventListener('submit', (ev) => { ev.preventDefault(); closeSuggest(); isLink($('url').value) ? lookup() : nameSearch(); });
+  $('lookup').addEventListener('submit', (ev) => { ev.preventDefault(); closeSuggest(); isLink($('url').value) ? openShow($('url').value) : nameSearch(); });
 
   // ---------- Search box: suggestions as you type, recent shows, keyboard control ----------
   // Your own shows answer at once from the followed list; wcostream's catalogue follows a moment later.
@@ -149,14 +210,14 @@
   }
   function choose(x) {
     closeSuggest();
-    if (!x.has) { $('url').value = x.title; nameSearch(); return; }   // not in Sonarr: the results panel has "Add to Sonarr"
+    if (!x.has) { nameSearch(x.title); return; }   // not in Sonarr: the results panel has "Add to Sonarr"
     if (x.lang) setSeg('lang', x.lang);
-    $('url').value = x.slug; $('sclear').hidden = false; $('skey').hidden = true; lookup();
+    openShow(x.slug);
   }
   $('url').addEventListener('input', suggest);
   $('url').addEventListener('focus', suggest);
   $('url').addEventListener('blur', () => setTimeout(closeSuggest, 120));
-  $('url').addEventListener('paste', () => setTimeout(() => { if (isLink($('url').value)) { closeSuggest(); lookup(); } }, 0));
+  $('url').addEventListener('paste', () => setTimeout(() => { if (isLink($('url').value)) { closeSuggest(); openShow($('url').value); } }, 0));
   $('url').addEventListener('keydown', (ev) => {
     const open = !$('suggest').hidden, n = sug.items.length;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
@@ -194,16 +255,19 @@
 
   // ---------- Search wcostream by name: shows you do not have yet are found here ----------
   const sonarrAdd = (name) => `http://${location.hostname}:8989/add/new?term=${encodeURIComponent(name)}`;
-  async function nameSearch() {
-    const q = $('url').value.trim(); if (!q) return;
+  async function nameSearch(words, o = {}) {
+    const q = String(words ?? $('url').value).trim(); if (!q) return;
     status('Searching wcostream. The first search can take a minute.');
     let found;
     try { found = await api('GET', '/library/search?q=' + encodeURIComponent(q)); }
     catch (e) { status(`Could not search wcostream: ${e.message}`, true); return; }
     status('');
+    const url = '?find=' + encodeURIComponent(q);
+    if (o.push !== false && location.search !== url) { keepScroll(); history.pushState({ v: 'found' }, '', url); }
+    view = 'found'; link = '';
     $('show').hidden = true; $('picker').hidden = true; $('empty').hidden = true; reveal($('found'));
-    $('run').hidden = true; show = null; sel.clear(); $('bar').classList.remove('on'); document.title = BASE_TITLE;
-    history.replaceState(null, '', location.pathname);
+    $('run').hidden = true; show = null; sel.clear(); $('bar').classList.remove('on'); document.title = `Search: ${q} · wco-dl`;
+    scrollTo(0, o.y || 0);
     $('foundhead').textContent = `On wcostream: "${q}"`;
     setTrail(`Search: ${q}`);
     $('foundhint').textContent = found.length ? 'Pick a show to see its episodes. One that is not in Sonarr has to be added there first, so its episodes have somewhere to go.'
@@ -226,8 +290,8 @@
       const r = await api('POST', '/sonarr/add', { name: add.dataset.add, slug: add.dataset.slug, tvdbId });
       if (r.added || r.already) {
         toast(r.added ? `Added to Sonarr: ${r.series.title} at ${r.series.path}` : `${r.series.title} is already in Sonarr`);
-        $('found').hidden = true; setSeg('lang', add.dataset.lang); $('url').value = add.dataset.slug;
-        await lookup('&seriesId=' + r.series.id); return;
+        setSeg('lang', add.dataset.lang);
+        await openShow(add.dataset.slug, { extra: '&seriesId=' + r.series.id }); return;
       }
       box.innerHTML = r.choices.length ? '<span class="hint">Which one?</span>' + r.choices.map((c) =>
         `<button class="btn" type="button" data-tvdb="${c.tvdbId}"${c.inSonarr ? ' disabled' : ''}>${UI.icon('plus')}${esc(c.title)} (${c.year || 'year unknown'})${c.network ? ' · ' + esc(c.network) : ''}${c.inSonarr ? ' · in Sonarr' : ''}</button>`).join('')
@@ -239,20 +303,19 @@
     const add = ev.target.closest('[data-add]'); if (add) { addToSonarr(add); return; }
     const tv = ev.target.closest('[data-tvdb]'); if (tv) { if (!tv.disabled) addToSonarr(tv, +tv.dataset.tvdb); return; }
     const b = ev.target.closest('[data-slug]'); if (!b || b.disabled) return;
-    $('found').hidden = true;
-    setSeg('lang', b.dataset.lang); $('url').value = b.dataset.slug; lookup();
+    setSeg('lang', b.dataset.lang); openShow(b.dataset.slug);
   });
 
   function setSeg(id, v) { $(id).querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
   $('lang').addEventListener('click', (ev) => {
     const b = ev.target.closest('button'); if (!b) return;
-    setSeg('lang', b.dataset.v); $('url').value = currentLink();
+    setSeg('lang', b.dataset.v); link = withLang(link);
     if (show?.series) renderShow(true);
   });
   $('numbering').addEventListener('click', (ev) => {
     const b = ev.target.closest('button'); if (!b || !show) return;
     if (sel.size && !confirm('Changing the numbering clears your selection. Continue?')) return;
-    lookup('&seriesId=' + show.series.id + '&absolute=' + b.dataset.v);
+    openShow(link, { extra: '&seriesId=' + show.series.id + '&absolute=' + b.dataset.v, push: false });
   });
 
   // Episodes wcostream does not list for this show (the server reads its show page; the first time can take a while).
@@ -531,7 +594,7 @@
       const f = [...fills.values()], n = (s) => f.filter((e) => e.state === s).length;
       toast(['Finished:', n('done') && `${n('done')} done`, n('premium') && `${n('premium')} sent to Sonarr`, n('kept') && `${n('kept')} to check`, n('failed') && `${n('failed')} failed`].filter(Boolean).join(' '));
       wcoStale = true;                                // the wcostream note counts what needs work: ask again
-      await lookup(); return;                         // fresh library state; lookup polls again
+      await openShow(link, { push: false }); return;  // fresh library state; opening it polls again
     }
     pollT = setTimeout(poll, showActive() ? 1500 : allRuns.some(isLive) ? 3000 : 15000);
   }
@@ -698,7 +761,7 @@
   // The list answers at once from what the server last knew. While it asks Sonarr again behind that answer it says so
   // in a header (X-Followed-Refreshing: 1): then the list is asked for again every 2 seconds, for 45 seconds at most,
   // and redrawn only if something changed; a row whose counts changed fades briefly.
-  let followed = [], followedLoaded = false, refreshT = null, refreshUntil = 0;
+  let followed = [], followedLoaded = false, refreshT = null, refreshUntil = 0, homeY = 0;
   async function loadFollowed() {
     clearTimeout(refreshT);
     let list, refreshing = false;
@@ -717,6 +780,7 @@
     followed = list; followedLoaded = true;
     if (!same) {
       renderHome();
+      if (first && homeY && view === 'home') scrollTo(0, homeY);
       if (!first) for (const x of list) {
         const o = was.get(x.slug);
         if (o && (o.missing !== x.missing || o.undub !== x.undub)) flash(x.slug);
@@ -826,12 +890,37 @@
   $('help').addEventListener('toggle', () => { try { localStorage.setItem('wco-help', $('help').open ? 'open' : 'closed'); } catch { /* not remembered */ } });
 
   // A link can name a show (?url=) or carry words to search for (?find=, what the header's search box sends from the other pages).
+  // Links to this page are followed here, without loading it again: a show opens out of its row, Home goes back.
+  document.addEventListener('click', (ev) => {
+    if (ev.defaultPrevented || ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    const a = ev.target.closest?.('a[href]'); if (!a || a.target === '_blank') return;
+    const u = new URL(a.href);
+    if (u.origin !== location.origin || u.pathname !== location.pathname) return;
+    ev.preventDefault();
+    const slug = u.searchParams.get('url');
+    if (slug) { if (a.closest('#queue')) openQueue(false); openShow(slug, { key: a.closest('#followedlist li')?.dataset.key }); }
+    else if (a.id === 'trailhome' && history.state?.home) history.back();   // back to Home where you were on it
+    else goHome({ hash: u.hash });
+  });
+  addEventListener('popstate', (ev) => {
+    const p = new URLSearchParams(location.search), y = ev.state?.y || 0;
+    if (p.get('url')) openShow(p.get('url'), { push: false, pop: true, y });
+    else if (p.get('find')) nameSearch(p.get('find'), { push: false, y });
+    else goHome({ push: false, pop: true, y, hash: location.hash });
+  });
+
+  // A link can name a show (?url=) or carry words to search for (?find=, what the header's search box sends from the other pages).
+  // Coming back to this page with Back, or reloading it, returns to where it was scrolled once its content is drawn.
   const params = new URLSearchParams(location.search), q = params.get('url'), find = (params.get('find') || '').trim();
+  const navType = performance.getEntriesByType?.('navigation')[0]?.type;
+  const y0 = navType === 'back_forward' || navType === 'reload' ? history.state?.y || 0 : 0;
   if (q || find) $('empty').hidden = true;
   document.documentElement.classList.remove('deep');
   if (location.hash === '#queue') openQueue(true);
+  homeY = q || find ? 0 : y0;
   loadFollowed();
-  if (q) { $('url').value = q; lookup(); }
-  else if (find) { $('url').value = find; $('sclear').hidden = false; $('skey').hidden = true; if (isLink(find)) lookup(); else { nameSearch(); poll(); } }
+  if (q) openShow(q, { push: false, y: y0 });
+  else if (find && isLink(find)) openShow(find, { push: false, y: y0 });
+  else if (find) { $('url').value = find; $('sclear').hidden = false; $('skey').hidden = true; nameSearch(find, { push: false, y: y0 }); poll(); }
   else poll();
 })();

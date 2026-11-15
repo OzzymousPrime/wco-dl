@@ -321,6 +321,12 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .runbar .ok{background:var(--accent)}.runbar .bad{background:var(--err)}.runbar .off{background:var(--muted)}
 .runbar i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width var(--mid) var(--ease)}
 
+/* A show opens out of its row (15 Nov 2026): the row's poster and title glide into the show's header and back.
+   The headings take the focus when the view changes, so a screen reader says where you are; they show no ring. */
+#showposter{view-transition-name:vt-poster}
+#title{view-transition-name:vt-title;width:fit-content;max-width:100%}
+#title:focus,#pagetitle:focus{outline:none}
+::view-transition-group(vt-poster),::view-transition-group(vt-title){animation-duration:280ms;animation-timing-function:cubic-bezier(.2,.7,.2,1)}
 /* Header B (15 Nov 2026): a trail under the header says where you are and gives the way back */
 .deep #empty{display:none}
 .trail{display:flex;gap:6px;align-items:center;min-height:24px;margin:-8px 0 16px;font-size:13px;color:var(--text-2)}

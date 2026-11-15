@@ -254,11 +254,14 @@
 
   // Episodes wcostream does not list for this show (the server reads its show page; the first time can take a while).
   // They are dotted, left out of "select all" and not queued overnight: a download of them fails.
-  let wcoFor = '', wcoGone = new Set(), wcoTogether = {};
+  // After a run for this show finishes the answer is asked for again (wcoStale): what needed work has changed. The old
+  // note and dots stay up until the new answer is in, so nothing blinks.
+  let wcoFor = '', wcoGone = new Set(), wcoTogether = {}, wcoStale = false;
   async function wcoNote(id) {
     const key = `${id}|${show.slug}|${lang()}|${show.absolute}`;
-    if (wcoFor === key) return;
-    wcoFor = key; wcoGone = new Set(); wcoTogether = {}; $('wconote').hidden = true;
+    if (wcoFor === key && !wcoStale) return;
+    if (wcoFor !== key) { wcoGone = new Set(); wcoTogether = {}; $('wconote').hidden = true; }
+    wcoFor = key; wcoStale = false;
     try {
       const d = await (await fetch(`/show/wco?url=${encodeURIComponent(show.slug)}&seriesId=${id}&lang=${lang()}&absolute=${!!show.absolute}`)).json();
       if (wcoFor !== key || !d.checked) return;
@@ -521,6 +524,7 @@
     if (wasActive && !showActive() && !queueErr) {
       const f = [...fills.values()], n = (s) => f.filter((e) => e.state === s).length;
       toast(['Finished:', n('done') && `${n('done')} done`, n('premium') && `${n('premium')} sent to Sonarr`, n('kept') && `${n('kept')} to check`, n('failed') && `${n('failed')} failed`].filter(Boolean).join(' '));
+      wcoStale = true;                                // the wcostream note counts what needs work: ask again
       await lookup(); return;                         // fresh library state; lookup polls again
     }
     pollT = setTimeout(poll, showActive() ? 1500 : allRuns.some(isLive) ? 3000 : 15000);
@@ -540,7 +544,8 @@
     const n = (s) => f.filter((e) => e.state === s).length;
     const active = f.some((e) => ACTIVE.includes(e.state)), cur = f.find(isWorking);
     const settled = f.length - n('queued') - n('downloading') - n('importing');
-    const pct = Math.round(((settled + (cur ? (cur.state === 'importing' ? 1 : (cur.progress ?? 0) / 100) : 0)) / f.length) * 100);
+    // The bar is the episode in hand, as in the queue panel: the words beside it ("2 of 5 finished") are the run.
+    const pct = cur ? (cur.state === 'importing' ? 100 : cur.progress ?? 0) : 0;
     const busyUntil = f.filter((e) => e.state === 'queued' && e.notBefore && new Date(e.notBefore) > new Date()).map((e) => e.notBefore).sort()[0];
     const head = cur ? (cur.state === 'importing' ? 'Importing' : 'Downloading')
       : !active ? 'Last run'
@@ -560,7 +565,7 @@
       `<button class="linkbtn" id="runqueue" type="button">Details and logs</button>` +
       (active ? '<button class="btn" id="cancel" type="button">Cancel</button>' : '') +
       (retryable ? '<button class="btn" id="retry" type="button">Retry failed (resumes partial downloads)</button>' : '') + '</div>' +
-      (active ? prog(pct, `This show's queue, ${pct}% finished`) : '');
+      (active ? prog(pct, 'Current episode') : '');
     smooth($('run'), 'run');
     $('cancel')?.addEventListener('click', () => runAction('cancel', runs.filter(isLive)));
     $('retry')?.addEventListener('click', () => runAction('retry', runs));
@@ -710,7 +715,8 @@
     }).join('');
     if (html !== lastHome) { lastHome = html; $('followedlist').innerHTML = html; }
   }
-  // Needs you: one row per episode whose newest attempt did not end in the library.
+  // Needs you: one row per episode whose newest attempt did not end in the library. The premium label says all the
+  // server's message does ("Premium only on wcostream: monitored and searched in Sonarr"), so that row shows the label alone.
   const ATTN = { failed: 'Failed', kept: 'Downloaded, not imported', premium: 'Premium-only: Sonarr is searching' };
   let lastAttn = null;
   function renderAttention() {
@@ -720,7 +726,7 @@
     const html = attention.map((a) => {
       const key = a.jobId + ':' + a.id;
       return `<li data-job="${a.jobId}" data-ep="${a.id}"><span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
-        <span class="msg">${esc(ATTN[a.state])}${a.message ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
+        <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
         <span class="acts">${a.state === 'premium' ? '' : '<button class="btn" data-a="retry" type="button">Retry</button>'}<button class="linkbtn" data-a="log" type="button">Log</button>
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn" data-a="dismiss" type="button">Dismiss</button></span>
         ${open.has(key) ? `<pre data-key="${key}">Loading…</pre>` : ''}</li>`;

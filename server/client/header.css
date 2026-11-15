@@ -167,8 +167,12 @@
 @keyframes cross{from{transform:translateX(-100%)}to{transform:translateX(320%)}}
 
 /* Toast */
-.toast{position:fixed;left:50%;bottom:88px;transform:translate(-50%,8px);padding:8px 14px;border-radius:8px;background:var(--primary);color:var(--on-primary);font-size:13px;opacity:0;transition:opacity var(--mid) var(--ease),transform var(--mid) var(--ease);pointer-events:none;z-index:30}
-.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast{position:fixed;left:50%;bottom:88px;transform:translate(-50%,8px);max-width:calc(100vw - 32px);padding:8px 14px;border-radius:8px;background:var(--primary);color:var(--on-primary);font-size:13px;opacity:0;visibility:hidden;transition:opacity var(--mid) var(--ease),transform var(--mid) var(--ease),visibility 0s var(--mid);pointer-events:none;z-index:30}
+.toast.on{opacity:1;visibility:visible;transform:translate(-50%,0);transition-delay:0s}
+/* With Undo: it can be pressed, and is a tab stop only while it shows */
+.toast.act{display:flex;gap:14px;align-items:center;pointer-events:auto}
+.tundo{all:unset;cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-weight:500;min-height:24px;min-width:24px;display:inline-flex;align-items:center}
+.tundo:focus-visible{outline:2px solid var(--on-primary);outline-offset:2px;border-radius:2px}
 
 /* Settings dialog (12 Nov 2026) */
 dialog.settings{width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 24px 64px rgba(0,0,0,.24)}

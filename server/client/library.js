@@ -15,8 +15,7 @@
     return data;
   }
   function status(msg, err) { const s = $('status'); s.hidden = !msg; s.textContent = msg || ''; s.classList.toggle('err', !!err); }
-  let tt;
-  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3600); }
+  const toast = UI.toast;
 
   function seg(id, options, current) {
     $(id).innerHTML = options.map(([v, label, n]) => `<button type="button" data-v="${esc(v)}" aria-pressed="${v === current}">${esc(label)}${n !== undefined ? ` <span class="count">${n}</span>` : ''}</button>`).join('');

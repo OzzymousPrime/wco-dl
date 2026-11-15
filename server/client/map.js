@@ -35,9 +35,11 @@
   }
   // The trail under the header: where you are, with the way back to Home.
   function setTrail(here) { $('trail').hidden = !here; $('trailhere').textContent = here || ''; }
+  // A request that is held back behind an Undo (see UI.toast): sent later, or as the page is left (keepalive).
+  const post = (url, body, keepalive) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), keepalive: !!keepalive })
+    .then((r) => { if (!r.ok) throw new Error(`The server answered ${r.status}`); return r; });
   function status(msg, err) { const s = $('status'); s.hidden = !msg; s.textContent = msg || ''; s.classList.toggle('err', !!err); }
-  let tt;
-  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3200); }
+  const toast = UI.toast;
 
   // ---------- Views and history (15 Nov 2026) ----------
   // Home, a show, the Sonarr picker and search results are views of this one page. Opening a show or a search adds a
@@ -312,10 +314,20 @@
     setSeg('lang', b.dataset.v); link = withLang(link);
     if (show?.series) renderShow(true);
   });
-  $('numbering').addEventListener('click', (ev) => {
-    const b = ev.target.closest('button'); if (!b || !show) return;
-    if (sel.size && !confirm('Changing the numbering clears your selection. Continue?')) return;
-    openShow(link, { extra: '&seriesId=' + show.series.id + '&absolute=' + b.dataset.v, push: false });
+  // Changing the numbering asks the server again, which clears the selection. It is not asked about first: it
+  // happens, and Undo puts back the numbering and what was selected.
+  const numberAs = (abs) => openShow(link, { extra: '&seriesId=' + show.series.id + '&absolute=' + abs, push: false });
+  $('numbering').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b || !show?.series || b.getAttribute('aria-pressed') === 'true') return;
+    const was = String(!!show.absolute), ids = new Set(picked().map((e) => e.id)), id = show.series.id;
+    await numberAs(b.dataset.v);
+    if (!ids.size || show?.series?.id !== id) return;
+    toast(`Numbering changed. ${ids.size} selected episode${ids.size === 1 ? ' was' : 's were'} cleared`, { key: 'numbering', undo: async () => {
+      if (show?.series?.id !== id) return;
+      await numberAs(was);
+      for (const e of eps) if (ids.has(e.id) && e.el && selectable(e)) sel.add(e.i);
+      render();
+    } });
   });
 
   // Episodes wcostream does not list for this show (the server reads its show page; the first time can take a while).
@@ -566,7 +578,7 @@
     if (!force && Date.now() - attnAt < 60000) return;   // it asks Sonarr, so not on every poll
     attnAt = Date.now();
     attention = await api('GET', '/attention').catch(() => attention);
-    UI.setCounts({ attention: attention.length });
+    UI.setCounts({ attention: attnShown().length });
     renderHome();
     if (location.hash === '#attention' && !attnAt0) { attnAt0 = true; $('attention').scrollIntoView({ block: 'start' }); }
   }
@@ -751,13 +763,46 @@
   $('follow').onclick = async () => {
     if (!show?.series) return;
     const on = $('follow').getAttribute('aria-pressed') !== 'true';
+    if (!on) { unfollow({ slug: show.slug, seriesId: show.series.id, title: show.series.title, language: lang() }); return; }
+    UI.unhold('unfollow:' + show.slug);                // following again by hand within the six seconds: the unfollow is dropped
+    gone.delete(show.slug);
     try {
       await api('POST', '/follow', { slug: show.slug, seriesId: show.series.id, follow: on, language: lang(), absolute: !!show.absolute });
       setFollow(on); show.follow = on;
-      toast(on ? `Following: gaps${lang() === 'dub' ? ' and dub swaps' : ''} fill between ${window.wcoNight()}` : 'No longer following');
+      toast(`Following: gaps${lang() === 'dub' ? ' and dub swaps' : ''} fill between ${window.wcoNight()}`);
       loadFollowed();
     } catch (e) { status(`Could not change following: ${e.message}`, true); }
   };
+  // Unfollow acts on screen at once (the row goes, the switch turns off) and offers Undo. The request is held back
+  // until the toast leaves, so Undo has nothing to take back on the server; the numbering it had is not touched.
+  const gone = new Set();                              // slugs unfollowed on screen, their request not sent yet
+  function unfollow(x) {
+    const name = x.title || x.slug, mine = () => show?.series && show.slug === x.slug;
+    const next = rowOf(x.slug)?.nextElementSibling || rowOf(x.slug)?.previousElementSibling;
+    const hadFocus = rowOf(x.slug)?.contains(document.activeElement);
+    gone.add(x.slug);
+    if (mine()) { setFollow(false); show.follow = false; }
+    renderHome();
+    if (hadFocus) (next?.querySelector('a') || $('pagetitle')).focus({ preventScroll: true });   // the pressed button went with its row
+    toast(`Unfollowed ${name}`, { key: 'unfollow:' + x.slug,
+      commit: async (keepalive) => {
+        try { await post('/follow', { slug: x.slug, seriesId: x.seriesId, follow: false, language: x.language === 'sub' ? 'sub' : 'dub' }, keepalive); }
+        catch (e) { status(`Could not unfollow ${name}: ${e.message}`, true); if (mine()) { setFollow(true); show.follow = true; } }
+        followed = followed.filter((f) => f.slug !== x.slug || !gone.has(x.slug));
+        await loadFollowed(); gone.delete(x.slug); renderHome();
+      },
+      undo: () => {
+        gone.delete(x.slug);
+        if (mine()) { setFollow(true); show.follow = true; }
+        renderHome();
+        rowOf(x.slug)?.querySelector('[data-unfollow]')?.focus({ preventScroll: true });
+      } });
+  }
+  $('followedlist').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-unfollow]'); if (!b) return;
+    const x = followed.find((f) => f.slug === b.closest('li').dataset.key);
+    if (x) unfollow(x);
+  });
   // The list answers at once from what the server last knew. While it asks Sonarr again behind that answer it says so
   // in a header (X-Followed-Refreshing: 1): then the list is asked for again every 2 seconds, for 45 seconds at most,
   // and redrawn only if something changed; a row whose counts changed fades briefly.
@@ -811,7 +856,7 @@
     $('fcounted').textContent = counted ? `counted ${when(counted)}` : 'not counted yet, so dub swaps are not shown';
     const incomplete = $('fkind').querySelector('[aria-pressed=true]').dataset.v === 'incomplete';
     $('fincomplete').textContent = String(followed.filter(needs).length);
-    const list = followed.filter((x) => (!f || name(x).toLowerCase().includes(f)) && (!incomplete || needs(x))).sort((a, b) => name(a).localeCompare(name(b), 'en', { sensitivity: 'base' }));
+    const list = followed.filter((x) => !gone.has(x.slug) && (!f || name(x).toLowerCase().includes(f)) && (!incomplete || needs(x))).sort((a, b) => name(a).localeCompare(name(b), 'en', { sensitivity: 'base' }));
     $('fhead').hidden = !followed.length; $('ffilter').hidden = followed.length <= 12;
     $('fcount').textContent = followed.length ? String(followed.length) : '';
     $('fnone').textContent = !followed.length ? 'Paste a show link above to see its episodes. Shows you follow are listed here.'
@@ -827,7 +872,8 @@
         : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;
       return { key: x.slug, html: `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
         `<span class="ft"><b class="fname">${esc(name(x))}</b><span class="fmeta">${lacks}${marks}</span></span></a>` +
-        (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') + '</li>' };
+        (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') +
+        `<button class="btn btn-quiet danger" data-unfollow type="button" aria-label="Unfollow ${esc(name(x))}">${UI.icon('x')}Unfollow</button></li>` };
     }));
   }
   // Needs you: one row per episode whose newest attempt did not end in the library. The premium label says all the
@@ -835,10 +881,11 @@
   const ATTN = { failed: 'Failed', kept: 'Downloaded, not imported', premium: 'Premium-only: Sonarr is searching' };
   let lastAttn = null;
   function renderAttention() {
-    $('attention').hidden = !attention.length;
-    $('attnhead').textContent = attention.length ? String(attention.length) : '';
+    const shown = attnShown();
+    $('attention').hidden = !shown.length;
+    $('attnhead').textContent = shown.length ? String(shown.length) : '';
     const open = new Set([...document.querySelectorAll('#attnlist pre')].map((p) => p.dataset.key));
-    const html = attention.map((a) => {
+    const html = shown.map((a) => {
       const key = a.jobId + ':' + a.id;
       return `<li data-job="${a.jobId}" data-ep="${a.id}">${UI.poster(a.seriesId, a.show)}<span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
         <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
@@ -857,14 +904,36 @@
     if (!pre) { pre = document.createElement('pre'); pre.dataset.key = key; li.appendChild(pre); }
     try { const r = await fetch(`/fill/jobs/${jid}/log/${eid}`); pre.textContent = await r.text(); } catch (e) { pre.textContent = 'Could not read the log: ' + e.message; }
   }
+  // Dismiss acts on screen at once and offers Undo; there is no un-dismiss on the server, so the requests are held
+  // back until the toast leaves. Rows dismissed one after another share one toast, and one Undo brings them all back.
+  const dismissed = new Set(); let batch = [];
+  const akey = (a) => a.jobId + ':' + a.id;
+  const attnShown = () => attention.filter((a) => !dismissed.has(akey(a)));
+  function showAttention() { UI.setCounts({ attention: attnShown().length }); renderHome(); }
+  function dismiss(rows) {
+    for (const a of rows) { dismissed.add(akey(a)); batch.push(a); }
+    const mine = batch;
+    showAttention();
+    toast(`Dismissed ${mine.length} episode${mine.length === 1 ? '' : 's'}`, { key: 'dismiss',
+      commit: async (keepalive) => {
+        if (batch === mine) batch = [];
+        const sent = await Promise.allSettled(mine.map((a) => post(`/fill/jobs/${a.jobId}/dismiss/${a.id}`, {}, keepalive)));
+        if (sent.some((r) => r.status === 'rejected')) status('Could not dismiss every episode: the ones still here were not dismissed.', true);
+        await loadAttention(true);
+        for (const a of mine) dismissed.delete(akey(a));
+        showAttention();
+      },
+      undo: () => { if (batch === mine) batch = []; for (const a of mine) dismissed.delete(akey(a)); showAttention(); } });
+  }
   $('attnlist').addEventListener('click', async (ev) => {
     const b = ev.target.closest('[data-a]'); if (!b) return;
     const li = b.closest('li'), jid = li.dataset.job, eid = li.dataset.ep;
     if (b.dataset.a === 'log') { const pre = li.querySelector('pre'); if (pre) pre.remove(); else attnLog(jid + ':' + eid); return; }
+    if (b.dataset.a === 'dismiss') { const a = attention.find((x) => x.jobId === jid && String(x.id) === eid); if (a) dismiss([a]); return; }
     try {
-      await api('POST', `/fill/jobs/${jid}/${b.dataset.a}/${eid}`, {});
-      toast(b.dataset.a === 'retry' ? 'Queued again: it resumes a partial download' : 'Dismissed');
-    } catch (e) { status(`Could not ${b.dataset.a} that episode: ${e.message}`, true); }
+      await api('POST', `/fill/jobs/${jid}/retry/${eid}`, {});
+      toast('Queued again: it resumes a partial download');
+    } catch (e) { status(`Could not retry that episode: ${e.message}`, true); }
     await loadAttention(true); poll();
   });
   $('recount').onclick = async () => {

@@ -249,6 +249,40 @@
     });
   }
 
+  // ---------- Toast, with Undo (15 Nov 2026) ----------
+  // UI.toast(msg) says something for a few seconds (the page's #toast, a status region, so it is read out).
+  // UI.toast(msg, { undo, commit, key }) is for something that has already happened on screen: commit(keepalive) is
+  // the request that makes it real, held back for six seconds. Undo (the button, or Ctrl+Z) drops the request and
+  // calls undo() to put the screen back. Another toast, or leaving the page, sends a held request at once; a toast
+  // with the same key takes the held one's place instead (its commit and undo then cover both).
+  let toastT = null, held = null;
+  const toastEl = () => document.getElementById('toast');
+  const hideToast = () => {
+    const t = toastEl(); clearTimeout(toastT);
+    if (t.contains(document.activeElement)) (document.querySelector('h1[tabindex]:not([hidden])') || document.body).focus?.({ preventScroll: true });
+    t.classList.remove('on', 'act');
+  };
+  const send = (keepalive) => { const h = held; held = null; if (h) h.commit(!!keepalive); };
+  UI.toast = (msg, o = {}) => {
+    const t = toastEl(); if (!t) return;
+    clearTimeout(toastT);
+    if (held && !(o.key && held.key === o.key)) send();
+    held = o.undo ? { key: o.key, commit: o.commit || (() => undefined), undo: o.undo } : held && o.key === held.key ? held : null;
+    t.innerHTML = `<span>${esc(msg)}</span>` + (o.undo ? '<span class="vh">. Press Control Z to undo.</span><button type="button" class="tundo" aria-keyshortcuts="Control+Z">Undo</button>' : '');
+    t.classList.add('on'); t.classList.toggle('act', !!o.undo);
+    toastT = setTimeout(() => { hideToast(); send(); }, o.undo ? 6000 : o.ms || 3600);
+  };
+  UI.undo = () => { const h = held; if (!h) return false; held = null; hideToast(); h.undo(); return true; };
+  // Drop a held request without putting the screen back: the person has just done the opposite by hand.
+  UI.unhold = (key) => { if (!held || held.key !== key) return false; held = null; hideToast(); return true; };
+  document.addEventListener('click', (ev) => { if (ev.target.closest?.('.tundo')) UI.undo(); });
+  document.addEventListener('keydown', (ev) => {
+    if (!held || ev.key.toLowerCase() !== 'z' || !(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey) return;
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;   // the field's own undo
+    ev.preventDefault(); UI.undo();
+  });
+  addEventListener('pagehide', () => send(true));       // leaving: the held request goes now, and outlives the page
+
   // ---------- Loading bar: appears after a short wait, so quick answers do not flash it ----------
   const bar = document.createElement('div'); bar.className = 'busy'; bar.setAttribute('role', 'progressbar'); bar.setAttribute('aria-label', 'Loading'); bar.hidden = true;
   bar.innerHTML = '<i></i>';

@@ -58,8 +58,7 @@
       `<div class="ep">Episode ${r.episode}${r.total ? ` of ${r.total}` : ''}${tags}${has}</div><div class="acts">${act}</div></li>`;
   }
 
-  let tt;
-  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 4200); }
+  const toast = (msg) => UI.toast(msg, { ms: 4200 });
   async function post(url, body) {
     const r = await window.wcoBusy(url, fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
     const d = await r.json().catch(() => ({}));

@@ -2,6 +2,7 @@
 // Listed dates are AnimeSchedule.net's; rows marked "estimate" are projected one a week by the server.
 (() => {
   const $ = (id) => document.getElementById(id);
+  const UI = window.wcoUI;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let data = { rows: [] }, scope = 'mine', dates = 'all';
 
@@ -45,9 +46,9 @@
     const sub = r.seriesId ? (r.seriesTitle !== r.title ? esc(r.title) : '') : `Not in Sonarr${r.onWco ? ' · on wcostream' : ''}`;
     const map = (q) => `<a class="linkbtn" href="/map.html?url=${encodeURIComponent(q)}">Open map</a>`;
     let act;
-    if (!r.seriesId) act = `<button class="btn" data-add type="button">Add to Sonarr</button>`;
-    else if (r.slug) act = (r.follow ? '' : '<button class="btn" data-follow type="button">Follow</button>') + map(r.slug);
-    else if (r.wcoState === 'exact') act = `<button class="btn" data-follow type="button">Follow</button>`;
+    if (!r.seriesId) act = `<button class="btn" data-add type="button">${UI.icon('plus')}Add to Sonarr</button>`;
+    else if (r.slug) act = (r.follow ? '' : `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>`) + map(r.slug);
+    else if (r.wcoState === 'exact') act = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>`;
     else if (r.wcoState === 'maybe') act = `<a class="linkbtn" href="/library.html">Pick on Library gaps</a>`;
     else act = `<a class="linkbtn" href="/map.html?url=${encodeURIComponent(r.seriesTitle || r.title)}">Find on wcostream</a>`;
     const has = r.wcoLatest ? `<span class="wco" title="The latest episode wcostream lists for this show">wcostream: up to ${esc(r.wcoLatest)}</span>` : '';

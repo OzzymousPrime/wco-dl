@@ -19,7 +19,7 @@
   <div id="status" class="status" hidden></div>
 
   <section class="queue" id="queue" hidden aria-label="Queue">
-    <div class="qhead"><h2>Queue</h2><span class="qbtns"><button class="btn" id="pausebtn" type="button" aria-pressed="false">Pause</button><button class="btn btn-quiet" id="queueclose" type="button">Close</button></span>
+    <div class="qhead"><h2>Queue</h2><span class="qbtns"><button class="btn" id="pausebtn" type="button" aria-pressed="false">Pause</button><button class="btn btn-quiet" id="queueclose" type="button" data-icon="x">Close</button></span>
       <span class="hint">What is downloading, then what waits in the order it will run, then finished runs. Retry resumes partial downloads.</span></div>
     <div class="now" id="queuenow" hidden></div>
     <div id="queuelist"></div>
@@ -52,7 +52,7 @@
         <div class="seg" role="group" aria-label="Numbering" id="numbering">
           <button type="button" data-v="false" aria-pressed="true">By season</button><button type="button" data-v="true" aria-pressed="false">Straight through</button>
         </div>
-        <button class="btn follow" id="follow" type="button" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg><span id="followlabel">Follow overnight</span></button>
+        <button class="btn follow" id="follow" type="button" aria-pressed="false" data-icon="check"><span id="followlabel">Follow overnight</span></button>
         <div class="seg" role="group" aria-label="Audio" id="lang">
           <button type="button" data-v="dub" aria-pressed="true">Dub</button><button type="button" data-v="sub" aria-pressed="false">Sub</button>
         </div>
@@ -72,7 +72,7 @@
         <span><i class="sw soon"></i>Not aired</span>
       </div>
       <span class="grow"></span>
-      <button class="btn" id="all" type="button">Select all that need work</button>
+      <button class="btn" id="all" type="button" data-icon="select"><span id="alllabel">Select all that need work</span></button>
     </div>
     <details class="help" id="help"><summary><span class="wide">How to select, and what the squares say during a run</span><span class="narrow">Key, numbering and help</span></summary>
       <p>Click or drag to select · <kbd>Shift</kbd> click for a range · click a season name for the whole season · arrows and <kbd>Space</kbd> with the keyboard · <kbd>Esc</kbd> clears</p>
@@ -101,12 +101,11 @@
 
 <div class="bar" id="bar"><div class="in">
   <div class="sum" id="sum" aria-live="polite"></div>
-  <button class="btn btn-quiet" id="clear" type="button">Clear</button>
+  <button class="btn btn-quiet" id="clear" type="button" data-icon="x">Clear</button>
   <span class="grow"></span>
   <label class="hint" for="q">Quality</label>
   <select id="q"><option value="1080">HD / FHD</option><option value="480">SD</option></select>
-  <button class="btn btn-primary" id="go" type="button">
-    <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg><span id="golabel">Download and import</span></button>
+  <button class="btn btn-primary" id="go" type="button" data-icon="download"><span id="golabel">Download and import</span></button>
 </div></div>
 <div class="toast" id="toast" role="status"></div>
   </main>

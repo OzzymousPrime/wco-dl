@@ -2,6 +2,7 @@
 // wco link or the wcostream shows of the same name. Server: GET /library/gaps, GET /library/search, POST /links.
 (() => {
   const $ = (id) => document.getElementById(id);
+  const UI = window.wcoUI;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const KINDS = [['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['maybe', 'Needs a pick'], ['none', 'No match']];
   const kindOf = (r) => (r.state === 'exact' ? 'ready' : r.state);
@@ -34,7 +35,7 @@
       `<span><b>${n('following').length}</b> following</span><span><b>${n('linked').length}</b> linked, not followed</span><span><b>${n('ready').length}</b> ready to follow</span><span><b>${n('maybe').length}</b> need a pick</span><span><b>${n('none').length}</b> no match</span>`;
     const ready = list.filter((r) => kindOf(r) === 'ready');
     $('followall').hidden = !ready.length;
-    $('followall').textContent = `Follow the ${ready.length} ready to follow${list.length !== rows.length ? ' shown' : ''}`;
+    $('followlabel').textContent = `Follow the ${ready.length} ready to follow${list.length !== rows.length ? ' shown' : ''}`;
     $('rows').innerHTML = list.length ? [...new Set(list.map((r) => r.root))].map((root) => {
       const g = list.filter((r) => r.root === root);
       return `<h2 class="group"><code>${esc(root)}</code><span class="hint">${g.length} series · ${sum(g, 'gaps').toLocaleString('en-GB')} episodes missing</span></h2><ul class="lib">${g.map(row).join('')}</ul>`;
@@ -46,15 +47,15 @@
     const find = `<button class="linkbtn" data-find type="button">${r.state === 'none' ? 'Search wcostream' : 'Search for another'}</button>`;
     let match, acts;
     if (r.state === 'following') { match = `<span class="tag ok">Following</span><span>${esc(r.slug)} · ${r.language}</span>`; acts = map(r.slug); }
-    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>`; acts = `<button class="btn" data-follow type="button">Follow</button>${map(r.slug)}`; }
+    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>`; acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
     else if (r.state === 'exact') {
       const c = r.candidates[0];
       match = `<span>${esc(c.name)}</span>${c.language === 'sub' ? '<span class="tag">sub only</span>' : ''}${find}`;
-      acts = `<button class="btn" data-follow type="button">Follow</button>${map(c.slug)}`;
+      acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(c.slug)}`;
     } else if (r.state === 'maybe') {
       match = `<select aria-label="wcostream show for ${esc(r.title)}"><option value="">Pick the wcostream show</option>${r.candidates.map((c, i) =>
         `<option value="${i}">${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</option>`).join('')}</select>${find}`;
-      acts = `<button class="btn" data-follow type="button">Follow</button>`;
+      acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>`;
     } else { match = `<span>No wcostream show by this name</span>${find}`; acts = ''; }
     return `<li data-id="${r.id}"><div class="name"><b title="${esc(r.title)}">${esc(r.title)}${r.year ? ` (${r.year})` : ''}</b><span title="${esc(r.path)}">${esc(r.path)}</span></div>` +
       `<div class="gaps">${[r.gaps > 0 && r.gaps + ' missing', r.undub > 0 && r.undub + ' to dub'].filter(Boolean).join(' · ')} <span>of ${r.total}</span>` +
@@ -106,7 +107,7 @@
     const box = input.parentElement.querySelector('.found');
     let found = [];
     try { found = await api('GET', '/library/search?q=' + encodeURIComponent(input.value)); } catch (e) { box.textContent = 'Could not search: ' + e.message; return; }
-    box.innerHTML = found.length ? found.map((c) => `<button class="btn" data-pick="${esc(c.slug)}" data-lang="${c.language}" type="button" title="Follow ${esc(r.title)} as ${esc(c.name)}">${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</button>`).join('')
+    box.innerHTML = found.length ? found.map((c) => `<button class="btn" data-pick="${esc(c.slug)}" data-lang="${c.language}" type="button" title="Follow ${esc(r.title)} as ${esc(c.name)}">${UI.icon('check')}${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</button>`).join('')
       : '<span class="hint">Nothing on wcostream by that name.</span>';
   }
 

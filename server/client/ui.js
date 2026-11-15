@@ -6,6 +6,35 @@
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* not remembered */ } } };
   const UI = window.wcoUI = { hooks: {} };
 
+  // ---------- Icons (15 Nov 2026): one per verb, the same on every page. 16px line icons in the text colour ----------
+  // download · copy · check (follow, save) · x (unfollow, dismiss, clear, cancel, close) · pause and play (resume) · retry ·
+  // grid (open map) · list (queue) · search · plus (add) · refresh (recount) · moon (theme) · select · next (run next) ·
+  // import · alert (needs you) · chev (show more) · cog (settings).
+  const ICON = {
+    download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+    check: '<path d="m5 12 5 5 9-10"/>',
+    x: '<path d="m6 6 12 12M18 6 6 18"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    play: '<path d="M8 5.5v13l10-6.5Z"/>',
+    retry: '<path d="M20 11a8 8 0 1 0-2.3 6"/><path d="M20 4v7h-7"/>',
+    grid: '<rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/>',
+    list: '<path d="M4 7h16M4 12h16M4 17h10"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    refresh: '<path d="M20 12a8 8 0 0 1-13.7 5.7"/><path d="M4 12a8 8 0 0 1 13.7-5.7"/><path d="M18 2.5v4h-4"/><path d="M6 21.5v-4h4"/>',
+    moon: '<path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/>',
+    select: '<rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 3.4"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+    next: '<path d="M12 19V6"/><path d="m6 11 6-6 6 6"/>',
+    import: '<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+    alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5v.01"/>',
+    chev: '<path d="m9 6 6 6-6 6"/>',
+    cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
+  };
+  const icon = UI.icon = (name, cls = '') => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
+  // A button written in a page's HTML names its icon (data-icon="download") and gets it here, before its label.
+  document.querySelectorAll('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
+
   // ---------- Header (15 Nov 2026): built once here, the same on every page ----------
   // Left: the mark and the pages. Middle: the search box. Right: what is happening (Needs you, Queue) and the looks.
   // A page gives <header class="top ui" id="top" data-page="home|library|calendar|browse"></header> and nothing else.
@@ -16,24 +45,24 @@
   if (top) {
     const PAGES = [['home', '/map.html', 'Home'], ['library', '/library.html', 'Library gaps'], ['calendar', '/calendar.html', 'Dub calendar'], ['browse', '/index.html', 'Browse']];
     const queue = page === 'home'
-      ? '<button class="btn" id="queuebtn" type="button" aria-expanded="false" aria-controls="queue">Queue <span id="queuecount" class="count"></span></button>'
-      : '<a class="btn" id="queuebtn" href="/map.html#queue">Queue <span id="queuecount" class="count"></span></a>';
+      ? `<button class="btn" id="queuebtn" type="button" aria-expanded="false" aria-controls="queue">${icon('list')}Queue <span id="queuecount" class="count"></span></button>`
+      : `<a class="btn" id="queuebtn" href="/map.html#queue">${icon('list')}Queue <span id="queuecount" class="count"></span></a>`;
     top.innerHTML = `<a class="brand" href="/map.html"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
       <nav class="nav" aria-label="Pages">${PAGES.map(([id, href, label]) => `<a href="${href}"${id === page ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
       <form class="lookup" id="lookup" role="search" aria-label="Search" action="/map.html" method="get">
         <div class="searchbox">
-          <svg class="ico sico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          ${icon('search', 'sico')}
           <input id="url" name="find" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search shows by name, or paste a wcostream show link"
             placeholder="Search shows, or paste a wcostream link" autocomplete="off" spellcheck="false">
           <kbd class="skey" id="skey" aria-hidden="true">/</kbd>
-          <button class="sclear" id="sclear" type="button" aria-label="Clear the search" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+          <button class="sclear" id="sclear" type="button" aria-label="Clear the search" hidden>${icon('x')}</button>
           <div class="suggest" id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
         </div>
       </form>
       <div class="side">
-        <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>Needs you <span class="count" id="attncount"></span></a>
+        <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>${icon('alert')}Needs you <span class="count" id="attncount"></span></a>
         ${queue}
-        <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg></button>
+        <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">${icon('moon')}</button>
       </div>`;
     // "/" or Ctrl+K reaches the search box from anywhere on any page.
     const box = document.getElementById('url');
@@ -114,7 +143,7 @@
   if (theme) {
     const cog = document.createElement('button');
     cog.className = 'btn btn-quiet'; cog.id = 'settingsbtn'; cog.type = 'button'; cog.setAttribute('aria-label', 'Settings'); cog.title = 'Settings';
-    cog.innerHTML = '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>';
+    cog.innerHTML = icon('cog');
     theme.after(cog);
     const hours = [...Array(24).keys()].map((h) => `<option value="${h}">${hh(h)}</option>`).join('');
     const dlg = document.createElement('dialog');
@@ -135,7 +164,7 @@
         <p class="hint" id="s-tokenhint"></p>
       </fieldset>
       <p class="serr" id="s-err" role="alert" hidden></p>
-      <div class="sacts"><button class="btn" type="button" id="s-cancel">Cancel</button><button class="btn btn-primary" type="submit" id="s-save">Save</button></div>
+      <div class="sacts"><button class="btn" type="button" id="s-cancel">${icon('x')}Cancel</button><button class="btn btn-primary" type="submit" id="s-save">${icon('check')}Save</button></div>
     </form>`;
     document.body.append(dlg);
     const f = (id) => dlg.querySelector('#' + id);

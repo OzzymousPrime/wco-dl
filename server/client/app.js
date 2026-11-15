@@ -345,11 +345,11 @@ function toggleSelection(anime, card) {
 
 function updateBatchUI() {
   const count = state.selected.size;
-  elements.batchToggleBtn.textContent = state.batchMode
+  elements.batchToggleBtn.querySelector('.lbl').textContent = state.batchMode
     ? `Cancel selection${count ? ` (${count} selected)` : ''}`
     : 'Select multiple';
   elements.batchToggleBtn.setAttribute('aria-pressed', String(state.batchMode));
-  elements.batchDownloadBtn.textContent = `Download ${count} selected`;
+  elements.batchDownloadBtn.querySelector('.lbl').textContent = `Download ${count} selected`;
   elements.batchDownloadBtn.classList.toggle('hidden', count === 0);
   elements.batchQuality.classList.toggle('hidden', !state.batchMode);
   elements.toolbar.classList.toggle('batch-active', state.batchMode);
@@ -679,7 +679,7 @@ function renderWebhooks(urls) {
     const remove = document.createElement('button');
     remove.className = 'btn btn-secondary btn-small';
     remove.type = 'button';
-    remove.textContent = 'Remove';
+    remove.innerHTML = window.wcoUI.icon('x') + 'Remove';
     remove.setAttribute('aria-label', `Remove webhook ${url}`);
     remove.addEventListener('click', () => {
       remove.disabled = true;

@@ -210,7 +210,7 @@
       : 'Nothing on wcostream by that name (dubbed anime, cartoons and subbed anime were searched). Try fewer words.';
     $('foundlist').innerHTML = found.map((c) => `<li><button type="button" data-slug="${esc(c.slug)}" data-lang="${c.language}"${c.series ? '' : ' disabled'}>${esc(c.name)}
       <span>${c.language === 'sub' ? 'sub only' : 'dub'} · ${c.series ? `in Sonarr as ${esc(c.series.title)}${c.follow ? ' · following' : ''}` : 'not in Sonarr yet'}</span></button>` +
-      (c.series ? '' : `<button class="btn" type="button" data-add="${esc(c.name)}" data-slug="${esc(c.slug)}" data-lang="${c.language}">Add to Sonarr</button>
+      (c.series ? '' : `<button class="btn" type="button" data-add="${esc(c.name)}" data-slug="${esc(c.slug)}" data-lang="${c.language}">${UI.icon('plus')}Add to Sonarr</button>
         <a class="linkbtn" href="${sonarrAdd(c.name.replace(/\b(English )?(Dubbed|Subbed)\b/gi, '').trim())}" target="_blank" rel="noopener">or add it by hand</a>
         <button class="linkbtn" type="button" data-slug="${esc(c.slug)}" data-lang="${c.language}">I have added it</button><span class="choices"></span>`) + '</li>').join('');
     if (found.some((c) => !c.series)) {
@@ -230,7 +230,7 @@
         await lookup('&seriesId=' + r.series.id); return;
       }
       box.innerHTML = r.choices.length ? '<span class="hint">Which one?</span>' + r.choices.map((c) =>
-        `<button class="btn" type="button" data-tvdb="${c.tvdbId}"${c.inSonarr ? ' disabled' : ''}>${esc(c.title)} (${c.year || 'year unknown'})${c.network ? ' · ' + esc(c.network) : ''}${c.inSonarr ? ' · in Sonarr' : ''}</button>`).join('')
+        `<button class="btn" type="button" data-tvdb="${c.tvdbId}"${c.inSonarr ? ' disabled' : ''}>${UI.icon('plus')}${esc(c.title)} (${c.year || 'year unknown'})${c.network ? ' · ' + esc(c.network) : ''}${c.inSonarr ? ' · in Sonarr' : ''}</button>`).join('')
         : '<span class="hint">Sonarr found no show by that name. Add it by hand under the name Sonarr knows.</span>';
     } catch (e) { status(`Could not add it to Sonarr: ${e.message}`, true); }
     add.disabled = false;
@@ -340,7 +340,7 @@
       const folded = !work.length && !open.has(s);
       if (folded) {
         cells.classList.add('folded');
-        cells.innerHTML = `<span class="fold">${list.length} episodes, ${list.every((e) => e.st === 'dub') ? 'all in English' : 'nothing to do'}</span><button type="button" class="btn btn-quiet fold-btn">Show squares</button>`;
+        cells.innerHTML = `<span class="fold">${list.length} episodes, ${list.every((e) => e.st === 'dub') ? 'all in English' : 'nothing to do'}</span><button type="button" class="btn btn-quiet fold-btn">${UI.icon('chev')}Show squares</button>`;
         cells.querySelector('.fold-btn').onclick = () => toggleFold(s);
       } else {
         list.forEach((e, k) => {
@@ -521,7 +521,8 @@
     const wasActive = showActive();
     try { [allRuns, qstate] = await Promise.all([api('GET', '/fill/jobs'), api('GET', '/fill/state')]); queueErr = ''; } catch (e) { queueErr = e.message; }
     if (my !== pollSeq) return;                       // a newer poll took over
-    $('pausebtn').textContent = qstate.paused ? 'Resume' : 'Pause';
+    const pauseLabel = qstate.paused ? 'Resume' : 'Pause';   // drawn only when it changes, so a press is never lost to a redraw
+    if ($('pausebtn').dataset.l !== pauseLabel) { $('pausebtn').dataset.l = pauseLabel; $('pausebtn').innerHTML = UI.icon(qstate.paused ? 'play' : 'pause') + pauseLabel; }
     $('pausebtn').setAttribute('aria-pressed', String(!!qstate.paused));
     loadAttention();
     applyRuns(); renderQueue(); renderHome();
@@ -576,8 +577,8 @@
     $('run').classList.toggle('bad', !!(n('kept') || n('failed')));
     $('run').innerHTML = `<div class="runrow"><b>${head}</b><span class="what">${detail}</span><span class="grow"></span><span class="meta">${bits}</span>` +
       `<button class="linkbtn" id="runqueue" type="button">Details and logs</button>` +
-      (active ? '<button class="btn" id="cancel" type="button">Cancel</button>' : '') +
-      (retryable ? '<button class="btn" id="retry" type="button">Retry failed (resumes partial downloads)</button>' : '') + '</div>' +
+      (active ? `<button class="btn" id="cancel" type="button">${UI.icon('x')}Cancel</button>` : '') +
+      (retryable ? `<button class="btn" id="retry" type="button">${UI.icon('retry')}Retry failed (resumes partial downloads)</button>` : '') + '</div>' +
       (active ? runbar : '');
     smooth($('run'), 'run' + (cur ? cur.id : ''));   // a new episode starts its segment from empty, it does not slide back from the last one's
     $('cancel')?.addEventListener('click', () => runAction('cancel', runs.filter(isLive)));
@@ -628,9 +629,9 @@
       const hidden = j.episodes.filter((e) => e.state !== 'cancelled').length - rows.length;
       return `<article class="qrun" data-id="${j.id}"><header><b>${esc(j.title)}</b>${j.auto ? '<span class="tag">overnight</span>' : ''}
         <span class="meta">${when(j.createdAt)} · ${j.language || 'default'} · ${bits}</span>
-        <span class="grow"></span>${live && !j.episodes.some(isWorking) ? `<button class="btn" data-act="next" type="button" title="${j.auto ? 'Start this overnight run now, ahead of everything waiting' : 'Move this run to the head of the queue'}">${j.auto ? 'Run now' : 'Run next'}</button>` : ''}
-        ${live ? `<button class="btn" data-act="cancel" type="button">Cancel</button>` : ''}
-        ${!live && (n('failed') || n('kept') || n('cancelled')) ? `<button class="btn" data-act="retry" type="button">Retry (resumes partial downloads)</button>` : ''}
+        <span class="grow"></span>${live && !j.episodes.some(isWorking) ? `<button class="btn" data-act="next" type="button" title="${j.auto ? 'Start this overnight run now, ahead of everything waiting' : 'Move this run to the head of the queue'}">${UI.icon('next')}${j.auto ? 'Run now' : 'Run next'}</button>` : ''}
+        ${live ? `<button class="btn" data-act="cancel" type="button">${UI.icon('x')}Cancel</button>` : ''}
+        ${!live && (n('failed') || n('kept') || n('cancelled')) ? `<button class="btn" data-act="retry" type="button">${UI.icon('retry')}Retry (resumes partial downloads)</button>` : ''}
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(j.slug)}">Open map</a></header>
         <ul class="qeps">${rows.map((e) => {
           const key = j.id + ':' + e.id, bad = e.state === 'failed' || e.state === 'kept';
@@ -740,7 +741,7 @@
       const key = a.jobId + ':' + a.id;
       return `<li data-job="${a.jobId}" data-ep="${a.id}"><span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
         <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
-        <span class="acts">${a.state === 'premium' ? '' : '<button class="btn" data-a="retry" type="button">Retry</button>'}<button class="linkbtn" data-a="log" type="button">Log</button>
+        <span class="acts">${a.state === 'premium' ? '' : `<button class="btn" data-a="retry" type="button">${UI.icon('retry')}Retry</button>`}<button class="linkbtn" data-a="log" type="button">Log</button>
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn" data-a="dismiss" type="button">Dismiss</button></span>
         ${open.has(key) ? `<pre data-key="${key}">Loading…</pre>` : ''}</li>`;
     }).join('');

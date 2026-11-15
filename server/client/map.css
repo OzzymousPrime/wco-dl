@@ -157,8 +157,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .help summary:hover{color:var(--text)}
 .help p{margin:8px 0 0}
 .help b{font-weight:500;color:var(--text-2)}
-.btn.follow svg{display:none}
-.btn.follow[aria-pressed=true] svg{display:block;stroke:var(--accent)}
+.btn.follow[aria-pressed=true] svg{stroke:var(--accent)}
 .home{padding:8px 0 0}
 .fhead{display:flex;gap:8px 12px;align-items:baseline;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .fhead h2{font-size:16px;font-weight:500;margin:0}
@@ -342,3 +341,8 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .trail a{color:var(--text-2);text-underline-offset:2px;display:inline-block;padding:3px 0}
 .trail a:hover{color:var(--text)}
 .trail [aria-current]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+
+/* An icon on every button (15 Nov 2026): rows whose button grew keep "Open map" on one line beside it */
+.lib li{grid-template-columns:minmax(0,1.2fr) 190px minmax(0,1.3fr) 190px}
+@media (max-width:720px){.lib li{grid-template-columns:1fr auto}}
+.lib .acts .linkbtn,.alist .acts .linkbtn{white-space:nowrap}

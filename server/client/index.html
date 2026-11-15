@@ -53,14 +53,15 @@
             <option value="480">SD (480p)</option>
           </select>
         </label>
-        <button id="batch-download-btn" class="btn btn-primary hidden" type="button"></button>
+        <button id="batch-download-btn" class="btn btn-primary hidden" type="button" data-icon="download"><span class="lbl"></span></button>
         <button
           id="batch-toggle-btn"
           class="btn btn-secondary"
           type="button"
           aria-pressed="false"
+          data-icon="select"
         >
-          Select multiple
+          <span class="lbl">Select multiple</span>
         </button>
       </div>
 
@@ -74,7 +75,7 @@
       <div id="error-state" class="error-state hidden">
         <div class="error-icon" aria-hidden="true">⚠️</div>
         <p id="error-message"></p>
-        <button id="retry-button" class="btn btn-secondary" type="button">Retry</button>
+        <button id="retry-button" class="btn btn-secondary" type="button" data-icon="retry">Retry</button>
       </div>
 
       <div id="empty-state" class="empty-state hidden">
@@ -101,7 +102,7 @@
             required
             aria-label="Webhook URL"
           />
-          <button id="webhook-add-btn" class="btn btn-primary" type="submit">Add</button>
+          <button id="webhook-add-btn" class="btn btn-primary" type="submit" data-icon="plus">Add</button>
         </form>
         <ul id="webhook-list" class="webhook-list"></ul>
       </section>
@@ -145,19 +146,19 @@
           </div>
 
           <div class="form-actions">
-            <button id="download-specific-btn" class="btn btn-primary series-only" type="button">
+            <button id="download-specific-btn" class="btn btn-primary series-only" type="button" data-icon="download">
               Download selection
             </button>
-            <button id="download-all-btn" class="btn btn-secondary series-only" type="button">
+            <button id="download-all-btn" class="btn btn-secondary series-only" type="button" data-icon="download">
               Download all seasons
             </button>
-            <button id="download-latest-btn" class="btn btn-secondary series-only" type="button">
+            <button id="download-latest-btn" class="btn btn-secondary series-only" type="button" data-icon="download">
               Download latest episode
             </button>
-            <button id="sonarr-import-btn" class="btn btn-secondary series-only" type="button">
+            <button id="sonarr-import-btn" class="btn btn-secondary series-only" type="button" data-icon="import">
               Sonarr import
             </button>
-            <button id="download-single-btn" class="btn btn-primary episode-only" type="button">
+            <button id="download-single-btn" class="btn btn-primary episode-only" type="button" data-icon="download">
               Download
             </button>
           </div>

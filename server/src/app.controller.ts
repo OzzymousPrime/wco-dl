@@ -10,9 +10,11 @@ import {
   Param,
   Post,
   Query,
+  Res,
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AppService } from './app.service';
 import { ContentItem } from './content-list';
 import {
@@ -108,8 +110,11 @@ export class AppController {
   }
 
   @Get('followed')
-  followed() {
-    return this.fillService.followed();
+  async followed(@Res({ passthrough: true }) res: Response) {
+    const list = await this.fillService.followed();
+    // Answered from the last known Sonarr facts while they are refreshed behind: the screen asks again shortly.
+    if (this.fillService.followedRefreshing) res.setHeader('X-Followed-Refreshing', '1');
+    return list;
   }
 
   @Post('follow')

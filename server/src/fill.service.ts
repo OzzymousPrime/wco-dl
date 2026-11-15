@@ -128,6 +128,11 @@ export function retryDue(airDate: string, tries: { n: number; last: string } | u
   return days >= RETRY_DAYS[n] ? 'due' : 'wait';
 }
 
+/** What the followed list takes from Sonarr, as last seen: per series id, [episodes, episodes with a file] and second folders. */
+interface FollowedFacts { at: number; ids: number[]; stats: Record<number, [number, number]>; split: Record<number, string[]> }
+const FACTS_FRESH_MS = 5 * 60 * 1000;
+const FACTS_RETRY_MS = 60 * 1000;
+
 @Injectable()
 export class FillService implements OnApplicationBootstrap {
   private readonly logger = new Logger(FillService.name);
@@ -870,20 +875,67 @@ export class FillService implements OnApplicationBootstrap {
       .sort((a, b) => a.root.localeCompare(b.root) || a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }));
   }
 
-  async followed() {
-    const prefs = await this.prefs();
-    // "missing" is Sonarr's own count: aired, monitored episodes with no file. Japanese-only files are not in it.
-    const stats = new Map<number, any>((await this.allSeries().catch(() => [])).map((s) => [s.id, s.statistics]));
+  // ---------- The followed list's Sonarr facts ----------
+  // The list itself comes from our own file. Two things in it come from Sonarr: Sonarr's own missing count, for a
+  // show we have not counted yet, and a show's second folders. Sonarr's whole series list takes about half a minute
+  // on a library of thousands, so the home screen never waits for it: it gets the last known facts at once (kept on
+  // disk, so a restart keeps them too) and they are refreshed behind.
+  private get factsFile() { return path.join(this.configDir, 'followed-facts.json'); }
+  private facts?: FollowedFacts;
+  private factsRead = false;
+  private factsTried = 0;
+  private factsRefresh?: Promise<void>;
+
+  /** True while those facts are being refreshed: the screen asks for the list again until this turns false. */
+  get followedRefreshing(): boolean { return !!this.factsRefresh; }
+
+  private async followedFacts(ids: number[]): Promise<FollowedFacts | undefined> {
+    if (!this.factsRead) {
+      this.factsRead = true;
+      try {
+        const f = JSON.parse(await fs.readFile(this.factsFile, 'utf8'));
+        if (typeof f?.at === 'number' && Array.isArray(f.ids) && f.stats && f.split) this.facts = f;
+      } catch { /* none yet, or unreadable: the refresh writes a new one */ }
+    }
+    const f = this.facts;
+    const known = new Set(f?.ids);
+    const stale = !f || Date.now() - f.at > FACTS_FRESH_MS || ids.some((id) => !known.has(id));
+    // After a failed try, wait a minute: a Sonarr that is down must not be asked on every visit.
+    if (stale && ids.length && this.config.sonarrApiKey && !this.factsRefresh && Date.now() - this.factsTried > FACTS_RETRY_MS) {
+      this.factsTried = Date.now();
+      this.factsRefresh = this.refreshFollowedFacts(ids)
+        .catch((err) => this.logger.warn(`Followed list: Sonarr facts not refreshed: ${(err as Error).message}`))
+        .finally(() => { this.factsRefresh = undefined; });
+    }
+    return f;
+  }
+
+  private async refreshFollowedFacts(ids: number[]) {
+    const all = await this.allSeries();
     const split = await this.splitFolders();
-    return Object.entries(prefs).filter(([, p]) => p.follow)
-      .map(([slug, p]) => {
-        const st = stats.get(p.seriesId);
-        // A real count (monitored or not) when there is one; else Sonarr's own, which skips unmonitored episodes.
-        return { slug, title: p.title, seriesId: p.seriesId, language: p.language ?? 'dub',
-          missing: p.counts?.missing ?? (st ? Math.max(0, (st.episodeCount ?? 0) - (st.episodeFileCount ?? 0)) : undefined),
-          undub: p.language === 'sub' ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: split.get(p.seriesId) ?? [],
-          unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p) };
-      });
+    const want = new Set(ids);
+    const facts: FollowedFacts = { at: Date.now(), ids, stats: {}, split: {} };
+    for (const s of all) if (want.has(s.id) && s.statistics) facts.stats[s.id] = [s.statistics.episodeCount ?? 0, s.statistics.episodeFileCount ?? 0];
+    for (const id of ids) { const folders = split.get(id); if (folders?.length) facts.split[id] = folders; }
+    this.facts = facts;
+    this.factsTried = 0;
+    const tmp = this.factsFile + '.tmp';
+    await fs.writeFile(tmp, JSON.stringify(facts));
+    await fs.rename(tmp, this.factsFile);
+  }
+
+  async followed() {
+    const mine = Object.entries(await this.prefs()).filter(([, p]) => p.follow);
+    const facts = await this.followedFacts(mine.map(([, p]) => p.seriesId));
+    return mine.map(([slug, p]) => {
+      // "missing" from Sonarr is its own count: aired, monitored episodes with no file. Japanese-only files are not in it.
+      const st = facts?.stats[p.seriesId];
+      // A real count (monitored or not) when there is one; else Sonarr's own, which skips unmonitored episodes.
+      return { slug, title: p.title, seriesId: p.seriesId, language: p.language ?? 'dub',
+        missing: p.counts?.missing ?? (st ? Math.max(0, st[0] - st[1]) : undefined),
+        undub: p.language === 'sub' ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: facts?.split[p.seriesId] ?? [],
+        unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p) };
+    });
   }
 
   /** Five past the hour the night window opens (01:05 by default): make the night's plan. */

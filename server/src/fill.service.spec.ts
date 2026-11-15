@@ -453,6 +453,70 @@ describe('show links and follows', () => {
     await expect(svc.setFollow({ slug: 'third-show', seriesId: 3, follow: true })).rejects.toThrow(/Nothing was changed/);
     expect(await fs.readFile(prefsFile, 'utf8')).toBe('{"first-show": {"seriesId"');
   });
+
+  describe('the followed list and a slow Sonarr', () => {
+    let seriesAsked: number;
+    let release: () => void;
+    let fail: boolean;
+    const settled = async (svc: FillService) => { for (let i = 0; i < 200 && svc.followedRefreshing; i++) await new Promise((r) => setTimeout(r, 10)); };
+
+    beforeEach(() => {
+      seriesAsked = 0;
+      fail = false;
+      const held = new Promise<void>((r) => { release = r; });
+      (axios.request as jest.Mock).mockImplementation(async (req: any) => {
+        const url = String(req.url).replace(/^.*\/api\/v3\//, '');
+        if (url === 'series') {
+          seriesAsked++;
+          await held;
+          if (fail) throw new Error('connect ECONNREFUSED');
+          return { data: [{ id: 1, title: 'Show 1', path: '/tv/Show 1', statistics: { episodeCount: 10, episodeFileCount: 7 } },
+            { id: 2, title: 'Show 2', path: '/tv/Show 2', statistics: { episodeCount: 4, episodeFileCount: 4 } }] };
+        }
+        if (url.startsWith('series/')) return { data: { id: Number(url.split('/')[1]), title: 'Show ' + url.split('/')[1] } };
+        if (url === 'rootfolder') return { data: [{ unmappedFolders: [{ name: 'Show 1', path: '/other/Show 1' }] }] };
+        return { data: [] };
+      });
+    });
+
+    it('answers at once from what it last knew, refreshes behind, and keeps the facts over a restart', async () => {
+      const svc = new FillService(config());
+      await svc.setFollow({ slug: 'first-show', seriesId: 1, follow: true });
+      // Sonarr has not answered yet: the list comes back anyway, without the two facts only Sonarr has.
+      const first = await svc.followed();
+      expect(first.map((f) => [f.slug, f.missing, f.split])).toEqual([['first-show', undefined, []]]);
+      expect(svc.followedRefreshing).toBe(true);
+      release();
+      await settled(svc);
+      expect((await svc.followed()).map((f) => [f.missing, f.split])).toEqual([[3, ['/other/Show 1']]]);
+      expect(svc.followedRefreshing).toBe(false);          // fresh: nothing more to wait for
+      // A newly followed show is not in those facts yet: one more look at Sonarr, and the first show keeps its count meanwhile.
+      await svc.setFollow({ slug: 'second-show', seriesId: 2, follow: true });
+      expect((await svc.followed()).map((f) => f.missing)).toEqual([3, undefined]);
+      await settled(svc);
+      expect((await svc.followed()).map((f) => f.missing)).toEqual([3, 0]);
+      // After a restart the facts come from disk: the full list with no call to Sonarr.
+      const asked = seriesAsked;
+      const again = new FillService(config());
+      expect((await again.followed()).map((f) => [f.missing, f.split.length])).toEqual([[3, 1], [0, 0]]);
+      expect(again.followedRefreshing).toBe(false);
+      expect(seriesAsked).toBe(asked);
+    });
+
+    it('does not ask a Sonarr that is down again on every visit', async () => {
+      fail = true;
+      release();
+      const svc = new FillService(config());
+      await svc.setFollow({ slug: 'first-show', seriesId: 1, follow: true });
+      const asked = seriesAsked;
+      await expect(svc.followed()).resolves.toHaveLength(1);
+      await settled(svc);
+      await expect(svc.followed()).resolves.toHaveLength(1);
+      await expect(svc.followed()).resolves.toHaveLength(1);
+      expect(svc.followedRefreshing).toBe(false);
+      expect(seriesAsked - asked).toBe(1);
+    });
+  });
 });
 
 describe('posters', () => {

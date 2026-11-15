@@ -342,6 +342,12 @@ describe('AppController (e2e)', () => {
     await request(app.getHttpServer()).get('/poster/abc').expect(404);
   });
 
+  it('answers the followed list at once, with nothing to wait for when Sonarr is not set up', async () => {
+    const res = await request(app.getHttpServer()).get('/followed').expect(200);
+    expect(res.body).toEqual([]);
+    expect(res.headers['x-followed-refreshing']).toBeUndefined();
+  });
+
   it('returns 404 for unknown downloads', async () => {
     await request(app.getHttpServer()).get('/downloads/unknown').expect(404);
   });

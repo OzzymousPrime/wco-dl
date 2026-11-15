@@ -345,6 +345,14 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .fmeta .gapmark{color:var(--jp)}
 .fmeta .tag{font-size:11px;padding:0 6px;line-height:16px}
 .flist .live{flex:none;font-size:12px;color:var(--accent);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* The home screen appears at once (15 Nov 2026): still grey rows until the first answer, then a short fade on a row
+   whose counts changed while Sonarr was being asked behind the list. */
+.flist li.sk:hover{background:none}
+.sk .ft{gap:8px}
+.sk i{display:block;height:10px;border-radius:5px;background:var(--surface-2)}
+.sk i + i{height:8px}
+.flist li.changed{animation:changed 1.6s var(--ease)}
+@keyframes changed{from{background:var(--accent-soft)}}
 /* The show page: the large poster beside the title */
 .showhead{display:flex;gap:16px;align-items:flex-start;min-width:0}
 .showhead > div:last-child{min-width:0}

@@ -695,8 +695,40 @@
       loadFollowed();
     } catch (e) { status(`Could not change following: ${e.message}`, true); }
   };
-  let followed = [], lastHome = null;
-  async function loadFollowed() { followed = await api('GET', '/followed').catch(() => followed); renderHome(); }
+  // The list answers at once from what the server last knew. While it asks Sonarr again behind that answer it says so
+  // in a header (X-Followed-Refreshing: 1): then the list is asked for again every 2 seconds, for 45 seconds at most,
+  // and redrawn only if something changed; a row whose counts changed fades briefly.
+  let followed = [], followedLoaded = false, refreshT = null, refreshUntil = 0;
+  async function loadFollowed() {
+    clearTimeout(refreshT);
+    let list, refreshing = false;
+    try {
+      const r = await fetch('/followed');
+      if (!r.ok) throw new Error(String(r.status));
+      refreshing = r.headers.get('X-Followed-Refreshing') === '1';
+      list = await r.json();
+    } catch { list = followed; }
+    if (refreshing && !refreshUntil) refreshUntil = Date.now() + 45000;
+    const again = refreshing && Date.now() < refreshUntil;
+    if (!again) refreshUntil = 0;
+    $('fupdating').hidden = !again;
+    const was = new Map(followed.map((x) => [x.slug, x])), first = !followedLoaded;
+    const same = !first && JSON.stringify(list) === JSON.stringify(followed);
+    followed = list; followedLoaded = true;
+    if (!same) {
+      renderHome();
+      if (!first) for (const x of list) {
+        const o = was.get(x.slug);
+        if (o && (o.missing !== x.missing || o.undub !== x.undub)) flash(x.slug);
+      }
+    }
+    if (again) refreshT = setTimeout(loadFollowed, 2000);
+  }
+  function flash(slug) {
+    const li = [...$('followedlist').children].find((el) => el.dataset.key === slug); if (!li) return;
+    li.classList.add('changed');
+    li.addEventListener('animationend', () => li.classList.remove('changed'), { once: true });
+  }
   function renderHome() {
     if ($('empty').hidden) return;
     const now = nowLine('<button class="linkbtn" id="nowqueue" type="button">Open the queue</button>');
@@ -707,6 +739,8 @@
       const a = act.get(j.seriesId) || { n: 0, cur: null }; a.n++; if (isWorking(e)) a.cur = e; act.set(j.seriesId, a);
     }
     renderAttention();
+    if (!followedLoaded) return;                       // the still grey rows stay until the first answer
+    $('followedlist').removeAttribute('aria-busy');
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
     const needs = (x) => x.missing > 0 || x.undub > 0;
     const counted = followed.map((x) => x.countedAt).filter(Boolean).sort()[0];
@@ -719,7 +753,7 @@
     $('fnone').textContent = !followed.length ? 'Paste a show link above to see its episodes. Shows you follow are listed here.'
       : !list.length ? (f ? `No followed show matches "${$('ffilter').value.trim()}".` : 'Every followed show has all its aired episodes, in the audio you follow it in.') : '';
     $('fnone').hidden = !$('fnone').textContent;
-    const html = list.map((x) => {
+    UI.patchList($('followedlist'), list.map((x) => {
       const a = act.get(x.seriesId);
       const marks = (x.language === 'sub' ? '<span class="tag">sub</span>' : '') +
         (x.switchTo ? `<span class="tag" title="Numbered ${x.switchTo === 'absolute' ? 'straight through' : 'by season'}, wcostream would supply more of this show's missing episodes. Open the show to switch.">check numbering</span>` : '') +
@@ -727,11 +761,10 @@
         ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '');
       const lacks = needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>`
         : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;
-      return `<li data-slug="${esc(x.slug)}"><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
+      return { key: x.slug, html: `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
         `<span class="ft"><b class="fname">${esc(name(x))}</b><span class="fmeta">${lacks}${marks}</span></span></a>` +
-        (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') + '</li>';
-    }).join('');
-    if (html !== lastHome) { lastHome = html; $('followedlist').innerHTML = html; }
+        (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') + '</li>' };
+    }));
   }
   // Needs you: one row per episode whose newest attempt did not end in the library. The premium label says all the
   // server's message does ("Premium only on wcostream: monitored and searched in Sonarr"), so that row shows the label alone.

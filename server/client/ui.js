@@ -57,6 +57,32 @@
     img.outerHTML = tile(img.dataset.t, ['l', 'xs'].find((s) => img.classList.contains(s)) || 's');
   }, true);
 
+  // ---------- Lists that are redrawn often (15 Nov 2026) ----------
+  // UI.patchList(ul, [{ key, html }]) makes the list match: a row whose markup is unchanged is left alone (its picture
+  // is not fetched again, its fade keeps playing, focus stays put), a changed one is swapped, the order is kept.
+  UI.patchList = (ul, items) => {
+    const old = new Map();
+    for (const el of [...ul.children]) { if (el.dataset.key === undefined) el.remove(); else old.set(el.dataset.key, el); }
+    let prev = null;
+    for (const { key, html } of items) {
+      let el = old.get(key);
+      old.delete(key);
+      if (!el || el._h !== html) {
+        const t = document.createElement('template'); t.innerHTML = html.trim();
+        const neu = t.content.firstElementChild; neu.dataset.key = key; neu._h = html;
+        if (el) {
+          const at = el.contains(document.activeElement) ? [...el.querySelectorAll('a,button,select,input')].indexOf(document.activeElement) : -1;
+          el.replaceWith(neu);
+          if (at >= 0) neu.querySelectorAll('a,button,select,input')[at]?.focus({ preventScroll: true });
+        }
+        el = neu;
+      }
+      if ((prev ? prev.nextElementSibling : ul.firstElementChild) !== el) { if (prev) prev.after(el); else ul.prepend(el); }
+      prev = el;
+    }
+    for (const el of old.values()) el.remove();
+  };
+
   // A button written in a page's HTML names its icon (data-icon="download") and gets it here, before its label.
   document.querySelectorAll('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
 

@@ -88,13 +88,19 @@
         <span class="hint">The last attempt failed, the file was not imported, or the episode is premium-only on wcostream</span></div>
       <ul class="alist" id="attnlist"></ul>
     </section>
-    <div class="fhead" id="fhead" hidden><h2>Followed shows <span class="count" id="fcount"></span></h2>
-      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span> · <span id="fcounted"></span> <button class="linkbtn" id="recount" type="button">Recount</button></span><span class="grow"></span>
+    <div class="fhead" id="fhead"><h2>Followed shows <span class="count" id="fcount"></span></h2>
+      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span> · <span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span> <button class="linkbtn" id="recount" type="button">Recount</button></span><span class="grow"></span>
       <div class="seg" role="group" aria-label="Which followed shows" id="fkind">
         <button type="button" data-v="all" aria-pressed="true">All</button><button type="button" data-v="incomplete" aria-pressed="false">Incomplete <span class="count" id="fincomplete"></span></button>
       </div>
       <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off" hidden></div>
-    <ul class="flist" id="followedlist"></ul>
+    <!-- Until the first answer arrives the list holds four still, grey rows, so the screen is never blank. -->
+    <ul class="flist" id="followedlist" aria-busy="true">
+      <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:62%"></i><i style="width:40%"></i></span></li>
+      <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:44%"></i><i style="width:22%"></i></span></li>
+      <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:70%"></i><i style="width:48%"></i></span></li>
+      <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:52%"></i><i style="width:30%"></i></span></li>
+    </ul>
     <p class="empty" id="fnone" hidden></p>
   </div>
 

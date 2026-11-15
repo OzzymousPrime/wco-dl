@@ -34,8 +34,6 @@ const elements = {
   downloadSpecificBtn: document.getElementById('download-specific-btn'),
   downloadSingleBtn: document.getElementById('download-single-btn'),
   sonarrImportBtn: document.getElementById('sonarr-import-btn'),
-  themeToggle: document.getElementById('theme-toggle'),
-  themeIcon: document.querySelector('.theme-icon'),
   statusMessage: document.getElementById('status-message'),
   downloads: document.getElementById('downloads'),
   downloadsList: document.getElementById('downloads-list'),
@@ -79,7 +77,6 @@ const LANGUAGES = {
 
 // Initialize
 function init() {
-  loadTheme();
   setupEventListeners();
   const hashType = location.hash.slice(1);
   if (ENDPOINTS[hashType]) {
@@ -105,21 +102,6 @@ async function apiRequest(path, options = {}) {
     throw error;
   }
   return data;
-}
-
-// Theme management
-function loadTheme() {
-  const savedTheme = localStorage.getItem('theme') || 'light';
-  document.documentElement.setAttribute('data-theme', savedTheme);
-  elements.themeIcon.textContent = savedTheme === 'light' ? '🌙' : '☀️';
-}
-
-function toggleTheme() {
-  const currentTheme = document.documentElement.getAttribute('data-theme');
-  const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', newTheme);
-  localStorage.setItem('theme', newTheme);
-  elements.themeIcon.textContent = newTheme === 'light' ? '🌙' : '☀️';
 }
 
 // Event listeners
@@ -163,9 +145,6 @@ function setupEventListeners() {
   elements.downloadSpecificBtn.addEventListener('click', () => downloadAnime('specific'));
   elements.downloadSingleBtn.addEventListener('click', () => downloadAnime('single'));
   elements.sonarrImportBtn.addEventListener('click', sonarrImport);
-
-  // Theme toggle
-  elements.themeToggle.addEventListener('click', toggleTheme);
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {

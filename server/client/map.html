@@ -3,35 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Episode map · wco-dl</title>
+<title>Home · wco-dl</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<script>try{var a=localStorage.getItem('wco-accent');if(a)document.documentElement.dataset.accent=a;var t=localStorage.getItem('wco-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var a=localStorage.getItem('wco-accent');if(a)document.documentElement.dataset.accent=a;var t=localStorage.getItem('wco-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}if(/[?&](url|find)=/.test(location.search))document.documentElement.classList.add('deep')</script>
+<link rel="stylesheet" href="header.css">
 <link rel="stylesheet" href="map.css">
 </head>
-<body>
+<body class="ui">
 <div class="page">
-  <header class="top">
-    <a class="brand" href="/"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
-    <nav class="nav" aria-label="Screens"><a href="/map.html" aria-current="page">Episode map</a><a href="/library.html">Library gaps</a><a href="/calendar.html">Dub calendar</a><a href="/map.html#attention">Needs you <span class="count" id="attncount"></span></a></nav>
-    <form class="lookup" id="lookup" role="search">
-      <div class="searchbox">
-        <svg class="ico sico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="url" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search shows by name, or paste a wcostream show link"
-          placeholder="Search shows by name, or paste a wcostream link" autocomplete="off" spellcheck="false">
-        <kbd class="skey" id="skey" aria-hidden="true">/</kbd>
-        <button class="sclear" id="sclear" type="button" aria-label="Clear the search" hidden><svg class="ico" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-        <div class="suggest" id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
-      </div>
-      <button class="btn" type="submit">Search</button>
-    </form>
-    <button class="btn" id="queuebtn" type="button" aria-expanded="false" aria-controls="queue">Queue <span id="queuecount" class="count"></span></button>
-    <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">
-      <svg class="ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
-    </button>
-  </header>
+  <header class="top ui" id="top" data-page="home"></header>
 
   <main>
-  <h1 class="vh" id="pagetitle">Episode map</h1>
+  <h1 class="vh" id="pagetitle">Home</h1>
+  <nav class="trail" id="trail" aria-label="You are here" hidden><a href="/map.html" id="trailhome">Home</a><span aria-hidden="true">›</span><span id="trailhere" aria-current="page"></span></nav>
   <div id="status" class="status" hidden></div>
 
   <section class="queue" id="queue" hidden aria-label="Queue">
@@ -111,7 +95,6 @@
       <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off" hidden></div>
     <ul class="flist" id="followedlist"></ul>
     <p class="empty" id="fnone" hidden></p>
-    <p class="hint foot"><a href="/index.html">The original downloader page</a></p>
   </div>
 
 <div class="tip" id="tip" role="tooltip" aria-hidden="true"></div>

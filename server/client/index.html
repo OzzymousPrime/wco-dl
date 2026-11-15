@@ -1,14 +1,21 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en-GB" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WCO Anime Downloader</title>
+    <title>Browse · wco-dl</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- This page's own styles know light and dark only by the attribute, so it is always set: the remembered choice, else the system's. -->
+    <script>try{var a=localStorage.getItem('wco-accent');if(a)document.documentElement.dataset.accent=a;document.documentElement.dataset.theme=localStorage.getItem('wco-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){}</script>
     <link rel="stylesheet" href="normalize.css" />
     <link rel="stylesheet" href="global.css" />
+    <link rel="stylesheet" href="header.css" />
   </head>
 
   <body>
+    <!-- The header every page shares, built by ui.js; the page below keeps its own styles. -->
+    <div class="hdrwrap"><header class="top ui" id="top" data-page="browse"></header></div>
+    <main>
     <div class="container">
       <header>
         <h1>WCO Downloader</h1>
@@ -16,15 +23,6 @@
           Download anime, cartoons and movies from
           <a href="https://www.wcostream.tv/" target="_blank" rel="noopener">wcostream.tv</a>
         </p>
-        <p class="subtitle"><a href="/map.html">Episode map: fill gaps and swap in dubs for a show</a></p>
-        <button
-          id="theme-toggle"
-          class="theme-toggle"
-          type="button"
-          aria-label="Toggle dark mode"
-        >
-          <span class="theme-icon">🌙</span>
-        </button>
       </header>
 
       <nav class="tabs" role="tablist" aria-label="Content type">
@@ -124,7 +122,7 @@
         <div class="modal-body">
           <p class="modal-link">
             <a id="modal-link" target="_blank" rel="noopener">Open on wcostream.tv</a>
-            · <a id="modal-map" class="series-only">Open in episode map (imports into Sonarr safely)</a>
+            · <a id="modal-map" class="series-only">Open its episode map (imports into Sonarr safely)</a>
           </p>
 
           <div class="series-only">
@@ -167,6 +165,9 @@
       </div>
     </div>
 
+    </main>
+    <div class="toast ui" id="toast" role="status"></div>
+    <script src="ui.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

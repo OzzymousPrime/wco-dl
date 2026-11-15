@@ -1,0 +1,188 @@
+[hidden]{display:none!important}
+/* Shared by every page (15 Nov 2026): the colour tokens, the header ui.js builds, and the few widgets that travel
+   with it (buttons, the search panel, the toast, the settings dialog, the loading bar). Split out of map.css so the
+   original downloader page can carry the same header without the map's page styles. Class names that page already
+   uses for something else (.btn) are only styled inside an element marked .ui, at the specificity of a single class. */
+:root{
+  --bg:#fafafa;--surface:#ffffff;--surface-2:#f2f2f3;--line:rgba(29,29,31,.10);--line-strong:rgba(29,29,31,.22);
+  --text:#1d1d1f;--text-2:#55555a;--muted:#6a6a70;
+  --accent:#4f46e5;--accent-soft:rgba(79,70,229,.10);--on-primary:#ffffff;--primary:#1d1d1f;
+  --jp:#8a6514;--jp-soft:rgba(176,128,20,.09);--jp-line:rgba(176,128,20,.62);--err:#b42318;
+  --ease:cubic-bezier(.2,.7,.2,1);--fast:120ms;--mid:180ms;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#161617;--surface:#1d1d1f;--surface-2:#26262a;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.20);
+  --text:#ededf0;--text-2:#a1a1a8;--muted:#86868d;
+  --accent:#8b93f8;--accent-soft:rgba(139,147,248,.14);--on-primary:#161617;--primary:#ededf0;
+  --jp:#d4b26a;--jp-soft:rgba(212,178,106,.10);--jp-line:rgba(212,178,106,.5);--err:#f97066;color-scheme:dark}}
+:root[data-theme=dark]{
+  --bg:#161617;--surface:#1d1d1f;--surface-2:#26262a;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.20);
+  --text:#ededf0;--text-2:#a1a1a8;--muted:#86868d;
+  --accent:#8b93f8;--accent-soft:rgba(139,147,248,.14);--on-primary:#161617;--primary:#ededf0;
+  --jp:#d4b26a;--jp-soft:rgba(212,178,106,.10);--jp-line:rgba(212,178,106,.5);--err:#f97066;color-scheme:dark}
+
+/* Accent picker (12 Nov 2026). Each accent is measured as text on every surface:
+   light on #fafafa / #f2f2f3, dark on #161617 / #26262a.
+   indigo 6.0 / 5.6, 6.6 / 5.5 · blue 6.4 / 6.0, 8.4 / 7.0 · teal 5.2 / 4.9, 12.2 / 10.2 · green 6.0+ / 5.6+, 10.4 / 8.7
+   rose 6.0 / 5.6, 6.7 / 5.6 · violet 5.5 / 5.1, 6.7 / 5.5 · graphite 16.1 / 15.0, 15.5 / 12.9 */
+:root{--accent-soft:color-mix(in srgb,var(--accent) 12%,transparent)}
+:root[data-accent=blue]{--accent:#1d4ed8}
+:root[data-accent=teal]{--accent:#0f766e}
+:root[data-accent=green]{--accent:#116d36}
+:root[data-accent=rose]{--accent:#be123c}
+:root[data-accent=violet]{--accent:#7c3aed}
+:root[data-accent=graphite]{--accent:#1d1d1f}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent)}
+  :root:not([data-theme=light])[data-accent=blue]{--accent:#7cb3ff}
+  :root:not([data-theme=light])[data-accent=teal]{--accent:#5eead4}
+  :root:not([data-theme=light])[data-accent=green]{--accent:#4ade80}
+  :root:not([data-theme=light])[data-accent=rose]{--accent:#fb7185}
+  :root:not([data-theme=light])[data-accent=violet]{--accent:#a78bfa}
+  :root:not([data-theme=light])[data-accent=graphite]{--accent:#ededf0}
+}
+:root[data-theme=dark]{--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent)}
+:root[data-theme=dark][data-accent=blue]{--accent:#7cb3ff}
+:root[data-theme=dark][data-accent=teal]{--accent:#5eead4}
+:root[data-theme=dark][data-accent=green]{--accent:#4ade80}
+:root[data-theme=dark][data-accent=rose]{--accent:#fb7185}
+:root[data-theme=dark][data-accent=violet]{--accent:#a78bfa}
+:root[data-theme=dark][data-accent=graphite]{--accent:#ededf0}
+/* in light mode a chosen accent must not be overridden by the dark tokens above when the system is dark but the page is set light */
+:root[data-theme=light][data-accent=blue]{--accent:#1d4ed8}
+:root[data-theme=light][data-accent=teal]{--accent:#0f766e}
+:root[data-theme=light][data-accent=green]{--accent:#116d36}
+:root[data-theme=light][data-accent=rose]{--accent:#be123c}
+:root[data-theme=light][data-accent=violet]{--accent:#7c3aed}
+:root[data-theme=light][data-accent=graphite]{--accent:#1d1d1f}
+
+/* ---------- What the header and its widgets need from the page, said here so any page can host them ---------- */
+.top,dialog.settings,.toast,.busy{font:14px/1.5 var(--sans);color:var(--text);text-align:left;-webkit-font-smoothing:antialiased}
+:where(.top,dialog.settings,.toast) :where(button,input,select){font:inherit;color:inherit;margin:0}
+:where(.top,dialog.settings,.toast) :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.vh{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.hint{color:var(--muted);font-size:12px}
+.count{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:500}
+
+/* Buttons: three ranks. Filled (.btn-primary) for the one action the screen is for, outlined (.btn) for the next
+   one or two, quiet text (.btn-quiet) for the rest. Every button carries its verb's icon before its label. */
+:where(.ui) .btn{height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:flex-start;gap:8px;white-space:nowrap;transition:background-color var(--fast) var(--ease),border-color var(--fast) var(--ease),color var(--fast) var(--ease),transform var(--fast) var(--ease)}
+:where(.ui) .btn:hover{background:var(--surface-2);transform:none}
+:where(.ui) .btn:active{transform:scale(.98)}
+:where(.ui) .btn-primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:500}
+:where(.ui) .btn-primary:hover{background:var(--primary);opacity:.9}
+:where(.ui) .btn-quiet{border-color:transparent;background:transparent;color:var(--text-2)}
+:where(.ui) a.btn{color:inherit;text-decoration:none}
+:where(.ui) a.btn.btn-quiet{color:var(--text-2)}
+.btn svg,.ico{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+@media (pointer:coarse){:where(.ui) .btn{min-height:44px}}
+
+/* ---------- Header: brand and pages on the left, search in the middle, what is happening on the right ---------- */
+.top{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;min-height:36px;margin-bottom:24px}
+.brand{font-weight:500;margin-right:4px;color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:8px;min-height:24px}
+.brand img{border-radius:5px;display:block}
+.nav{display:flex;gap:4px}
+.nav a{padding:6px 10px;border-radius:8px;color:var(--text-2);text-decoration:none;white-space:nowrap}
+.nav a:hover{background:var(--surface-2)}
+.nav a[aria-current]{color:var(--text);background:var(--surface-2)}
+.lookup{flex:1 1 220px;display:flex;min-width:0}
+.side{display:flex;gap:4px;align-items:center}
+.side .btn-quiet{padding:0 10px}
+
+/* Search box with its panel of results (11 Nov 2026; on every page since 15 Nov) */
+.searchbox{position:relative;flex:1;min-width:0}
+.searchbox input{width:100%;height:36px;padding:0 64px 0 36px;border-radius:8px;border:1px solid var(--line);background:var(--surface);transition:border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}
+.searchbox input:hover{border-color:var(--line-strong)}
+.searchbox input:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.searchbox input::placeholder{color:var(--muted);opacity:1}
+.sico{position:absolute;left:12px;top:50%;translate:0 -50%;color:var(--muted);pointer-events:none}
+.skey{position:absolute;right:10px;top:50%;translate:0 -50%;color:var(--muted);pointer-events:none;font-family:var(--mono);font-size:11px;line-height:1.5;padding:1px 6px;border-radius:4px;border:1px solid var(--line);border-bottom-width:2px;background:var(--surface)}
+.searchbox input:focus ~ .skey{opacity:0}
+.sclear{all:unset;position:absolute;right:6px;top:50%;translate:0 -50%;width:28px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--muted);cursor:pointer}
+.sclear:hover{background:var(--surface-2);color:var(--text)}
+.sclear:focus-visible{outline:2px solid var(--accent)}
+.suggest{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;padding:6px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:0 12px 32px rgba(0,0,0,.14);max-height:min(60vh,440px);overflow:auto;animation:rise var(--fast) var(--ease) both}
+.sgroup{padding:8px 10px 4px;font-size:12px;color:var(--muted)}
+.sopt{display:flex;gap:10px;align-items:center;padding:6px 10px;min-height:36px;border-radius:8px;cursor:pointer}
+.sopt[aria-selected=true]{background:var(--surface-2)}
+.sopt .ico{color:var(--text-2)}
+.sname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.smeta{margin-left:auto;flex:none;font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.snote{padding:10px;font-size:12px;color:var(--muted)}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}}   /* no "to": it ends at the element's own look, so a not-aired square stays dim */
+
+/* The header stays within reach on a long page; a hairline appears once the page has moved. */
+@media (min-width:721px){
+  .top{position:sticky;top:0;z-index:15;background:var(--bg);margin:-12px -24px 12px;padding:12px 24px;border-bottom:1px solid transparent;transition:border-color var(--mid) var(--ease)}
+  .scrolled .top{border-bottom-color:var(--line)}
+}
+/* Phone (12 Nov 2026, redone for the 15 Nov header): the mark and what is happening on the first row, the pages
+   next, the search last. Each row wraps inside itself before anything runs off the edge. */
+@media (max-width:720px){
+  .top{column-gap:6px}
+  .side{margin-left:auto;flex-wrap:wrap;justify-content:flex-end;gap:2px}
+  .side .btn{padding:0 8px}
+  .nav{order:1;flex-basis:100%;min-width:0;flex-wrap:wrap;gap:0}
+  .nav a{padding:6px 7px;font-size:13px}
+  .lookup{order:2;flex-basis:100%}
+  .skey{display:none}.searchbox input{padding-right:40px}
+}
+@media (pointer:coarse){.searchbox input{min-height:44px}.sopt{padding:12px 10px}}
+/* A page with its own body styles wraps the header in .hdrwrap: a full-width strip, not sticky. */
+.hdrwrap{background:var(--bg);border-bottom:1px solid var(--line)}
+.hdrwrap .top{position:static;max-width:1240px;margin:0 auto;padding:12px 24px;border-bottom:0}
+@media (max-width:720px){.hdrwrap .top{padding:12px 16px}}
+
+/* Accent picker */
+.looks{position:relative;display:flex}
+.swatch{display:block;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--line)}
+.accents{position:absolute;right:0;top:calc(100% + 6px);z-index:40;display:flex;gap:4px;padding:6px;border-radius:12px;border:1px solid var(--line);background:var(--surface);box-shadow:0 12px 32px rgba(0,0,0,.14);animation:rise var(--fast) var(--ease) both}
+.accents button{all:unset;width:28px;height:28px;display:grid;place-items:center;border-radius:8px;cursor:pointer}
+.accents button:hover{background:var(--surface-2)}
+.accents button:focus-visible{outline:2px solid var(--accent)}
+.accents button[aria-checked=true]{box-shadow:inset 0 0 0 1.5px var(--text-2)}
+.accents [data-accent=indigo] .swatch{background:#4f46e5}.accents [data-accent=blue] .swatch{background:#1d4ed8}
+.accents [data-accent=teal] .swatch{background:#0f766e}.accents [data-accent=green] .swatch{background:#116d36}
+.accents [data-accent=rose] .swatch{background:#be123c}.accents [data-accent=violet] .swatch{background:#7c3aed}
+.accents [data-accent=graphite] .swatch{background:#55555a}
+@media (pointer:coarse){.accents button{width:40px;height:40px}}
+
+/* Loading bar: a short piece of the accent crossing the top edge while Sonarr or wcostream is being asked */
+.busy{position:fixed;left:0;right:0;top:0;height:2px;z-index:60;overflow:hidden;background:var(--accent-soft)}
+.busy i{position:absolute;top:0;bottom:0;left:0;width:32%;border-radius:2px;background:var(--accent);animation:cross 1.1s cubic-bezier(.45,.05,.3,.95) infinite}
+@keyframes cross{from{transform:translateX(-100%)}to{transform:translateX(320%)}}
+
+/* Toast */
+.toast{position:fixed;left:50%;bottom:88px;transform:translate(-50%,8px);padding:8px 14px;border-radius:8px;background:var(--primary);color:var(--on-primary);font-size:13px;opacity:0;transition:opacity var(--mid) var(--ease),transform var(--mid) var(--ease);pointer-events:none;z-index:30}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* Settings dialog (12 Nov 2026) */
+dialog.settings{width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 24px 64px rgba(0,0,0,.24)}
+dialog.settings[open]{animation:rise var(--fast) var(--ease) both}
+dialog.settings::backdrop{background:rgba(0,0,0,.36)}
+dialog.settings form{padding:24px;display:grid;gap:20px}
+dialog.settings h2{margin:0;font-size:18px;font-weight:500;line-height:1.5}
+dialog.settings fieldset{margin:0;padding:0;border:0;display:grid;gap:8px;min-width:0}
+dialog.settings legend{padding:0;margin-bottom:4px;font-size:12px;color:var(--muted)}
+.srow{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.srow label{font-size:14px;color:var(--text-2)}
+.srow select,.srow input{height:36px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;min-width:0}
+.srow input[type=number]{width:96px}
+.srow input[type=password]{flex:1 1 220px}
+.srow select:focus-visible,.srow input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+dialog.settings .hint{margin:0}
+.serr{margin:0;color:var(--err);font-size:13px}
+.sacts{display:flex;gap:8px;justify-content:flex-end}
+@media (pointer:coarse){.srow select,.srow input{height:44px}}
+
+/* Pages change with a short cross-fade; everything here stands still when the system asks for less motion. */
+@view-transition{navigation:auto}
+::view-transition-old(root),::view-transition-new(root){animation-duration:140ms}
+@media (prefers-reduced-motion:reduce){
+  :where(.top,dialog.settings,.toast,.busy),:where(.top,dialog.settings,.toast,.busy) *{transition:none!important;animation:none!important}
+  .busy i{width:100%;opacity:.5}
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}
+}

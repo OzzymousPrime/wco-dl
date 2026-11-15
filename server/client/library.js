@@ -122,17 +122,8 @@
   $('drive').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { drive = b.dataset.v; render(); } });
   $('kind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { kind = b.dataset.v; render(); } });
   $('filter').addEventListener('input', render);
-  $('theme').onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; };
 
-  async function queueCount() {
-    const runs = await api('GET', '/fill/jobs').catch(() => []);
-    const n = runs.reduce((a, j) => a + j.episodes.filter((e) => ['queued', 'downloading', 'importing'].includes(e.state)).length, 0);
-    $('queuecount').textContent = n ? String(n) : '';
-    const attn = await api('GET', '/attention').catch(() => []);
-    $('attncount').textContent = attn.length ? String(attn.length) : '';
-  }
   (async () => {
-    queueCount(); setInterval(queueCount, 60000);
     try {
       const data = await api('GET', '/library/gaps');
       rows = data.rows;

@@ -76,7 +76,7 @@
           toast(d.already ? `${r.title} is already in Sonarr: reload to see it` : `Added ${r.title} to Sonarr. Sonarr is not told to search: follow it to have wco-dl fill it`);
           if (d.added) setTimeout(() => load(true), 1500);
         } else {
-          toast(`Sonarr found ${(d.choices || []).length} possible matches for "${r.title}": add it from the Episode map search, where you can choose`);
+          toast(`Sonarr found ${(d.choices || []).length} possible matches for "${r.title}": search for it in the box at the top, where you can choose`);
         }
       } else {
         const c = r.slug ? { slug: r.slug, language: r.language || 'dub' } : (r.candidates || [])[0];
@@ -112,15 +112,5 @@
   }
   $('filter').addEventListener('input', render);
   $('refresh').addEventListener('click', () => load(true));
-  $('theme').onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; };
-  (async () => {   // the header counts, as on the other screens
-    try {
-      const runs = await (await fetch('/fill/jobs')).json();
-      const n = runs.reduce((a, j) => a + j.episodes.filter((e) => ['queued', 'downloading', 'importing'].includes(e.state)).length, 0);
-      $('queuecount').textContent = n ? String(n) : '';
-      const attn = await (await fetch('/attention')).json();
-      $('attncount').textContent = attn.length ? String(attn.length) : '';
-    } catch { /* counts are optional */ }
-  })();
   load(false);
 })();

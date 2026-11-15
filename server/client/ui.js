@@ -1,8 +1,77 @@
-// Shared by the episode map and the library screen (12 Nov 2026): the accent picker, a remembered light or dark
-// choice, and the thin loading bar shown while the server is asking Sonarr or wcostream for something.
+// Shared by every page (12 Nov 2026; the header since 15 Nov): the header itself, the accent picker, a remembered
+// light or dark choice, the settings dialog, the header counts, and the thin loading bar shown while the server is
+// asking Sonarr or wcostream for something. Pages reach the shared helpers through window.wcoUI.
 (() => {
   const root = document.documentElement;
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* not remembered */ } } };
+  const UI = window.wcoUI = { hooks: {} };
+
+  // ---------- Header (15 Nov 2026): built once here, the same on every page ----------
+  // Left: the mark and the pages. Middle: the search box. Right: what is happening (Needs you, Queue) and the looks.
+  // A page gives <header class="top ui" id="top" data-page="home|library|calendar|browse"></header> and nothing else.
+  // On the map page the Queue control opens the panel in place, so it is a button there and a link elsewhere.
+  const top = document.getElementById('top');
+  const page = top?.dataset.page || '';
+  UI.page = page;
+  if (top) {
+    const PAGES = [['home', '/map.html', 'Home'], ['library', '/library.html', 'Library gaps'], ['calendar', '/calendar.html', 'Dub calendar'], ['browse', '/index.html', 'Browse']];
+    const queue = page === 'home'
+      ? '<button class="btn" id="queuebtn" type="button" aria-expanded="false" aria-controls="queue">Queue <span id="queuecount" class="count"></span></button>'
+      : '<a class="btn" id="queuebtn" href="/map.html#queue">Queue <span id="queuecount" class="count"></span></a>';
+    top.innerHTML = `<a class="brand" href="/map.html"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
+      <nav class="nav" aria-label="Pages">${PAGES.map(([id, href, label]) => `<a href="${href}"${id === page ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
+      <form class="lookup" id="lookup" role="search" aria-label="Search" action="/map.html" method="get">
+        <div class="searchbox">
+          <svg class="ico sico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="url" name="find" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search shows by name, or paste a wcostream show link"
+            placeholder="Search shows, or paste a wcostream link" autocomplete="off" spellcheck="false">
+          <kbd class="skey" id="skey" aria-hidden="true">/</kbd>
+          <button class="sclear" id="sclear" type="button" aria-label="Clear the search" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+          <div class="suggest" id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
+        </div>
+      </form>
+      <div class="side">
+        <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>Needs you <span class="count" id="attncount"></span></a>
+        ${queue}
+        <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg></button>
+      </div>`;
+    // "/" or Ctrl+K reaches the search box from anywhere on any page.
+    const box = document.getElementById('url');
+    document.addEventListener('keydown', (ev) => {
+      const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+      if ((ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); box.focus(); box.select(); }
+    });
+    addEventListener('scroll', () => root.classList.toggle('scrolled', scrollY > 8), { passive: true });
+    // Light or dark: flips what is showing now, and remembers it. A page with its own body styles ([data-theme]
+    // only, no system query) always carries the attribute, set in its <head>.
+    document.getElementById('theme').addEventListener('click', () => {
+      const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = dark ? 'light' : 'dark'; store.set('wco-theme', root.dataset.theme);
+    });
+  }
+  // The header counts. "Needs you" is shown only when there is something; it is the count of episodes.
+  UI.setCounts = ({ queue, attention }) => {
+    const q = document.getElementById('queuecount'), a = document.getElementById('attncount'), ab = document.getElementById('attnbtn');
+    if (q && queue !== undefined) q.textContent = queue ? String(queue) : '';
+    if (a && attention !== undefined) { a.textContent = attention ? String(attention) : ''; ab.hidden = !attention; }
+  };
+  // Pages without a queue of their own ask for the two counts here: the queue every minute (every 15 seconds while
+  // something is active), "Needs you" once a minute because the server asks Sonarr for it.
+  if (top && page !== 'home') {
+    const ACTIVE = ['queued', 'downloading', 'importing'];
+    let attnAt = 0;
+    const tick = async () => {
+      let active = 0;
+      try {
+        const runs = await (await fetch('/fill/jobs')).json();
+        active = runs.reduce((n, j) => n + j.episodes.filter((e) => ACTIVE.includes(e.state)).length, 0);
+        UI.setCounts({ queue: active });
+        if (Date.now() - attnAt >= 60000) { attnAt = Date.now(); UI.setCounts({ attention: (await (await fetch('/attention')).json()).length }); }
+      } catch { /* the counts are optional */ }
+      setTimeout(tick, active ? 15000 : 60000);
+    };
+    tick();
+  }
 
   // ---------- Accent: six measured colours; each is at least 4.5:1 as text on every surface, light and dark ----------
   const ACCENTS = [['indigo', 'Indigo'], ['blue', 'Blue'], ['teal', 'Teal'], ['green', 'Green'], ['rose', 'Rose'], ['violet', 'Violet'], ['graphite', 'Graphite']];
@@ -28,8 +97,6 @@
       if (ev.key === 'Escape') { ev.stopPropagation(); open(false); btn.focus(); }
     });
     document.addEventListener('pointerdown', (ev) => { if (!menu.hidden && !wrap.contains(ev.target)) open(false); });
-    // The page's own handler flips light and dark; remember what it chose.
-    theme.addEventListener('click', () => setTimeout(() => store.set('wco-theme', root.dataset.theme || ''), 0));
   }
 
   // ---------- Settings (12 Nov 2026): the cog beside the light and dark button ----------
@@ -51,7 +118,7 @@
     theme.after(cog);
     const hours = [...Array(24).keys()].map((h) => `<option value="${h}">${hh(h)}</option>`).join('');
     const dlg = document.createElement('dialog');
-    dlg.className = 'settings'; dlg.setAttribute('aria-labelledby', 'settingstitle');
+    dlg.className = 'settings ui'; dlg.setAttribute('aria-labelledby', 'settingstitle');
     dlg.innerHTML = `<form method="dialog" id="settingsform">
       <h2 id="settingstitle">Settings</h2>
       <fieldset><legend>Overnight runs</legend>

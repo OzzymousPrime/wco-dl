@@ -4,6 +4,7 @@
 // screen-reader state on every square, errors stay on screen, Sub mode never offers dub swaps, quiet seasons fold.
 (() => {
   const $ = (id) => document.getElementById(id);
+  const UI = window.wcoUI;
   const pad = (n) => String(n).padStart(2, '0');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtDate = (s) => (s ? new Date(s + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'not set');
@@ -32,6 +33,8 @@
     if (!r.ok) throw new Error(data.message ? [].concat(data.message).join('; ') : `The server answered ${r.status}`);
     return data;
   }
+  // The trail under the header: where you are, with the way back to Home.
+  function setTrail(here) { $('trail').hidden = !here; $('trailhere').textContent = here || ''; }
   function status(msg, err) { const s = $('status'); s.hidden = !msg; s.textContent = msg || ''; s.classList.toggle('err', !!err); }
   let tt;
   function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 3200); }
@@ -68,6 +71,7 @@
   }
   function showPicker(cands, hint) {
     $('show').hidden = true; $('empty').hidden = true; $('picker').hidden = false;
+    setTrail('Which show in Sonarr?');
     $('pickhint').textContent = hint;
     renderPicks(cands || []);
     $('search').value = ''; $('search').focus();
@@ -176,10 +180,6 @@
     $('suggest').querySelectorAll('.sopt').forEach((x) => x.setAttribute('aria-selected', String(+x.dataset.n === sug.active)));
   });
   $('sclear').onclick = () => { $('url').value = ''; $('url').focus(); suggest(); };
-  document.addEventListener('keydown', (ev) => {
-    const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
-    if ((ev.key === '/' && !typing) || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); $('url').focus(); $('url').select(); }
-  });
 
   // ---------- Motion: small, quick, and off when the system asks for less ----------
   // A panel that appears rises a few pixels; a progress bar slides from where it was instead of jumping.
@@ -191,7 +191,6 @@
     if (from && from !== to) { bar.style.width = from; void bar.offsetWidth; bar.style.width = to; }
     lastWidth.set(key, to);
   }
-  addEventListener('scroll', () => document.documentElement.classList.toggle('scrolled', scrollY > 8), { passive: true });
 
   // ---------- Search wcostream by name: shows you do not have yet are found here ----------
   const sonarrAdd = (name) => `http://${location.hostname}:8989/add/new?term=${encodeURIComponent(name)}`;
@@ -206,6 +205,7 @@
     $('run').hidden = true; show = null; sel.clear(); $('bar').classList.remove('on'); document.title = BASE_TITLE;
     history.replaceState(null, '', location.pathname);
     $('foundhead').textContent = `On wcostream: "${q}"`;
+    setTrail(`Search: ${q}`);
     $('foundhint').textContent = found.length ? 'Pick a show to see its episodes. One that is not in Sonarr has to be added there first, so its episodes have somewhere to go.'
       : 'Nothing on wcostream by that name (dubbed anime, cartoons and subbed anime were searched). Try fewer words.';
     $('foundlist').innerHTML = found.map((c) => `<li><button type="button" data-slug="${esc(c.slug)}" data-lang="${c.language}"${c.series ? '' : ' disabled'}>${esc(c.name)}
@@ -310,6 +310,7 @@
   function renderShow(keepSelection) {
     $('empty').hidden = true; if ($('show').hidden) reveal($('show'));
     $('title').textContent = show.series.title;
+    setTrail(show.series.title);
     $('path').textContent = show.series.path;
     const split = show.split || [];
     $('split').hidden = !split.length;
@@ -501,7 +502,7 @@
     if (!force && Date.now() - attnAt < 60000) return;   // it asks Sonarr, so not on every poll
     attnAt = Date.now();
     attention = await api('GET', '/attention').catch(() => attention);
-    $('attncount').textContent = attention.length ? String(attention.length) : '';
+    UI.setCounts({ attention: attention.length });
     renderHome();
     if (location.hash === '#attention' && !attnAt0) { attnAt0 = true; $('attention').scrollIntoView({ block: 'start' }); }
   }
@@ -611,7 +612,7 @@
   const qopen = new Set(); let lastQ = null;
   function renderQueue() {
     const active = allRuns.reduce((a, j) => a + j.episodes.filter((e) => ACTIVE.includes(e.state)).length, 0);
-    $('queuecount').textContent = active ? String(active) : '';
+    UI.setCounts({ queue: active });
     if ($('queue').hidden) return;
     const now = nowLine();
     $('queuenow').hidden = !now; if ($('queuenow').dataset.h !== now) { $('queuenow').dataset.h = now; $('queuenow').innerHTML = now; smooth($('queuenow'), 'queue'); }
@@ -786,9 +787,13 @@
   try { $('help').open = localStorage.getItem('wco-help') === 'open'; } catch { /* private window: stay folded */ }
   $('help').addEventListener('toggle', () => { try { localStorage.setItem('wco-help', $('help').open ? 'open' : 'closed'); } catch { /* not remembered */ } });
 
-  $('theme').onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; };
-  const q = new URLSearchParams(location.search).get('url');
+  // A link can name a show (?url=) or carry words to search for (?find=, what the header's search box sends from the other pages).
+  const params = new URLSearchParams(location.search), q = params.get('url'), find = (params.get('find') || '').trim();
+  if (q || find) $('empty').hidden = true;
+  document.documentElement.classList.remove('deep');
   if (location.hash === '#queue') openQueue(true);
   loadFollowed();
-  if (q) { $('url').value = q; lookup(); } else poll();
+  if (q) { $('url').value = q; lookup(); }
+  else if (find) { $('url').value = find; $('sclear').hidden = false; $('skey').hidden = true; if (isLink(find)) lookup(); else { nameSearch(); poll(); } }
+  else poll();
 })();

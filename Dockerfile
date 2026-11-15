@@ -1,5 +1,5 @@
 # Build stage for Node dependencies
-FROM node:21-alpine AS node-builder
+FROM node:22-alpine AS node-builder
 
 WORKDIR /app/server
 
@@ -24,8 +24,11 @@ RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 # Install Node.js
 RUN apt-get update && \
     apt-get install -y curl ffmpeg && \
-    curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
+    # The server runs with plain node. npm is never used at runtime, so it and the packages it bundles
+    # are left out of the image (they are a regular source of scanner findings).
+    rm -rf /usr/lib/node_modules/npm /usr/bin/npm /usr/bin/npx && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

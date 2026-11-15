@@ -162,20 +162,11 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .fhead{display:flex;gap:8px 12px;align-items:baseline;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .fhead h2{font-size:16px;font-weight:500;margin:0}
 .fhead input{height:32px;width:220px;max-width:100%;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface)}
-.flist{list-style:none;margin:0;padding:0;columns:280px;column-gap:24px}
-/* A row with more marks than fit wraps them under the name (right-aligned) rather than crushing the name to a letter (15 Nov 2026) */
-.flist li{break-inside:avoid;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px 8px;align-items:baseline;padding:5px 8px;margin:0 -8px;border-radius:8px}
-.flist li:hover{background:var(--surface-2)}
-.flist a{color:var(--text);text-decoration:none;min-width:0;margin-right:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.flist a:hover{text-decoration:underline;text-underline-offset:2px}
-.flist .live{margin-left:auto;font-size:12px;color:var(--accent);white-space:nowrap}
 .empty{padding:32px 0}
 @media (max-width:720px){.fhead input{width:100%}.runrow .grow{display:none}}
-@media (pointer:coarse){.flist li{padding:10px 8px}.fhead input{min-height:44px}}
+@media (pointer:coarse){.fhead input{min-height:44px}}
 
 /* Screens nav, "incomplete" filter and missing marks on the home list, library gaps screen (11 Nov 2026) */
-.flist .gapmark{margin-left:auto;font-size:12px;color:var(--jp);white-space:nowrap;font-variant-numeric:tabular-nums}
-.flist .gapmark + .live{margin-left:0}
 .fhead .seg button{height:28px}
 .group{display:flex;gap:12px;align-items:baseline;font-size:14px;font-weight:500;margin:24px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 .group code{font-family:var(--mono);font-size:13px}
@@ -222,7 +213,6 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .alist pre{grid-column:1/-1;margin:0;padding:12px;border-radius:8px;background:var(--bg);border:1px solid var(--line);font:12px/1.5 var(--mono);color:var(--text-2);white-space:pre-wrap;max-height:320px;overflow:auto}
 .foot{margin-top:32px}
 .foot a{color:inherit}
-.flist .gapmark{white-space:nowrap}
 @media (max-width:720px){.alist li{grid-template-columns:48px minmax(0,1fr)}.alist .acts{grid-column:1/-1;justify-content:flex-start}}
 
 /* A file whose audio is not labelled (11 Nov 2026): looks like any library file, with a "?" and a pointer cursor in Dub mode */
@@ -240,9 +230,6 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 
 /* Split-folder note and marks, add-to-Sonarr choices (11 Nov 2026, fourth pass) */
 .splitnote{margin-top:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--jp-line);background:var(--jp-soft);color:var(--jp);font-size:13px;max-width:760px;overflow-wrap:anywhere}
-.flist .tag{flex:none}
-.flist .tag + .gapmark{margin-left:0}
-.flist a + .tag{margin-left:auto}
 #found .choices{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 #found .choices:empty{display:none}
 #found .choices .btn{flex:none;min-width:0;width:auto;padding:0 12px;box-sizing:border-box;border:1px solid var(--line);background:var(--surface)}
@@ -327,7 +314,6 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .linkbtn{display:inline-block;line-height:18px;padding:3px 2px;margin:-3px -2px}
 #found li .linkbtn{display:inline-block;padding:3px 0}
 @media (pointer:fine){.where button{padding:3px 0;margin:-3px 0}}
-.flist a{padding:2px 0;margin-top:-2px;margin-bottom:-2px}
 .foot a,.credit a,.dubnote a{display:inline-block;padding:4px 0;margin:-4px 0}
 /* 7. Run strip bar: a segment per episode. Same 4px height and 12px margin as .prog, so the strip does not move */
 .runbar{display:flex;gap:2px;height:4px;margin-top:12px}
@@ -343,6 +329,35 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .trail [aria-current]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 
 /* An icon on every button (15 Nov 2026): rows whose button grew keep "Open map" on one line beside it */
-.lib li{grid-template-columns:minmax(0,1.2fr) 190px minmax(0,1.3fr) 190px}
-@media (max-width:720px){.lib li{grid-template-columns:1fr auto}}
 .lib .acts .linkbtn,.alist .acts .linkbtn{white-space:nowrap}
+
+/* Small posters in every list (15 Nov 2026) */
+/* Followed shows: poster, the name over one line of what it lacks, and what the queue is doing for it. The whole of
+   the poster and name is the link. Rows flow in columns, so a long list still fits a screen. */
+.flist{list-style:none;margin:0;padding:0;columns:340px;column-gap:24px}
+.flist li{break-inside:avoid;display:flex;gap:12px;align-items:center;padding:5px 8px;margin:0 -8px;border-radius:8px;min-width:0}
+.flist li:hover{background:var(--surface-2)}
+.frow{flex:1;min-width:0;display:flex;gap:12px;align-items:center;color:var(--text);text-decoration:none;border-radius:4px}
+.frow:hover .fname{text-decoration:underline;text-underline-offset:2px}
+.ft{flex:1;min-width:0;display:flex;flex-direction:column}
+.fname{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmeta{display:flex;gap:2px 6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.fmeta .gapmark{color:var(--jp)}
+.fmeta .tag{font-size:11px;padding:0 6px;line-height:16px}
+.flist .live{flex:none;font-size:12px;color:var(--accent);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* The show page: the large poster beside the title */
+.showhead{display:flex;gap:16px;align-items:flex-start;min-width:0}
+.showhead > div:last-child{min-width:0}
+#showposter{flex:none;width:64px;height:96px}
+/* Queue, Needs you, Library gaps and Dub calendar rows */
+.qrun header .poster{margin-right:-2px}
+.alist li{grid-template-columns:28px 56px minmax(0,1fr) auto}
+.lib li{grid-template-columns:28px minmax(0,1.2fr) 190px minmax(0,1.3fr) 190px}
+.cal li{grid-template-columns:56px 28px minmax(0,1.6fr) minmax(0,1fr) 136px}
+@media (max-width:720px){
+  .alist li{grid-template-columns:28px 48px minmax(0,1fr)}
+  .lib li{grid-template-columns:28px minmax(0,1fr) auto}
+  .cal li{grid-template-columns:56px 28px minmax(0,1fr)}
+  .cal .ep,.cal .acts{grid-column:3}
+  .showhead{gap:12px}
+}

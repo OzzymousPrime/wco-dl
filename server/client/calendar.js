@@ -53,6 +53,7 @@
     else act = `<a class="linkbtn" href="/map.html?url=${encodeURIComponent(r.seriesTitle || r.title)}">Find on wcostream</a>`;
     const has = r.wcoLatest ? `<span class="wco" title="The latest episode wcostream lists for this show">wcostream: up to ${esc(r.wcoLatest)}</span>` : '';
     return `<li class="${r.estimate ? 'est' : ''}" data-route="${esc(r.route)}"><time datetime="${esc(r.date)}">${r.estimate ? '' : clock(r.date)}</time>` +
+      (r.seriesId ? UI.poster(r.seriesId, r.seriesTitle || r.title) : '<span class="poster none"></span>') +
       `<div class="name"><b title="${esc(r.seriesTitle || r.title)}">${esc(r.seriesTitle || r.title)}</b>${sub ? `<span>${sub}</span>` : ''}</div>` +
       `<div class="ep">Episode ${r.episode}${r.total ? ` of ${r.total}` : ''}${tags}${has}</div><div class="acts">${act}</div></li>`;
   }

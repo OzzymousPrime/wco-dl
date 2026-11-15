@@ -32,6 +32,31 @@
     cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
   };
   const icon = UI.icon = (name, cls = '') => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
+  // ---------- Posters (15 Nov 2026): a show's small Sonarr poster at the left of its row ----------
+  // UI.poster(seriesId, title, size) gives the markup: 's' 28x42 in lists, 'l' 64x96 on the show page, 'xs' 18x27 in the
+  // search panel. The space is reserved, so nothing moves when the picture arrives. A show with no poster (or no Sonarr
+  // id) gets a tile: two letters from its title on one of six muted tones, picked by a hash of the title so it never changes.
+  const esc = UI.esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const POSTER = { s: [28, 42], l: [64, 96], xs: [18, 27] };
+  const noPoster = new Set();
+  const initials = (t) => {
+    const w = String(t || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean);
+    return (w.length > 1 ? [...w[0]][0] + [...w[1]][0] : [...(w[0] || '?')].slice(0, 2).join('')).toUpperCase();
+  };
+  const tone = (t) => { let h = 0; for (const c of String(t || '')) h = (h * 31 + c.codePointAt(0)) >>> 0; return (h % 6) + 1; };
+  const tile = (title, size) => `<span class="poster ${size} tile p${tone(title)}" aria-hidden="true">${esc(initials(title))}</span>`;
+  UI.poster = (id, title, size = 's') => {
+    if (!id || noPoster.has(String(id))) return tile(title, size);
+    const [w, h] = POSTER[size];
+    return `<img class="poster ${size}" src="/poster/${encodeURIComponent(id)}" width="${w}" height="${h}" loading="lazy" decoding="async" alt="" data-id="${esc(id)}" data-t="${esc(title)}">`;
+  };
+  document.addEventListener('error', (ev) => {       // no picture: the tile takes its place, and later rows skip the request
+    const img = ev.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('poster')) return;
+    noPoster.add(img.dataset.id);
+    img.outerHTML = tile(img.dataset.t, ['l', 'xs'].find((s) => img.classList.contains(s)) || 's');
+  }, true);
+
   // A button written in a page's HTML names its icon (data-icon="download") and gets it here, before its label.
   document.querySelectorAll('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
 
@@ -47,7 +72,7 @@
     const queue = page === 'home'
       ? `<button class="btn" id="queuebtn" type="button" aria-expanded="false" aria-controls="queue">${icon('list')}Queue <span id="queuecount" class="count"></span></button>`
       : `<a class="btn" id="queuebtn" href="/map.html#queue">${icon('list')}Queue <span id="queuecount" class="count"></span></a>`;
-    top.innerHTML = `<a class="brand" href="/map.html"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
+    top.innerHTML = `<a class="brand" href="/map.html" aria-label="wco-dl, Home"><img src="favicon.svg" width="20" height="20" alt=""><span>wco-dl</span></a>
       <nav class="nav" aria-label="Pages">${PAGES.map(([id, href, label]) => `<a href="${href}"${id === page ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
       <form class="lookup" id="lookup" role="search" aria-label="Search" action="/map.html" method="get">
         <div class="searchbox">

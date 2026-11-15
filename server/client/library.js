@@ -57,7 +57,7 @@
         `<option value="${i}">${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</option>`).join('')}</select>${find}`;
       acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>`;
     } else { match = `<span>No wcostream show by this name</span>${find}`; acts = ''; }
-    return `<li data-id="${r.id}"><div class="name"><b title="${esc(r.title)}">${esc(r.title)}${r.year ? ` (${r.year})` : ''}</b><span title="${esc(r.path)}">${esc(r.path)}</span></div>` +
+    return `<li data-id="${r.id}">${UI.poster(r.id, r.title)}<div class="name"><b title="${esc(r.title)}">${esc(r.title)}${r.year ? ` (${r.year})` : ''}</b><span title="${esc(r.path)}">${esc(r.path)}</span></div>` +
       `<div class="gaps">${[r.gaps > 0 && r.gaps + ' missing', r.undub > 0 && r.undub + ' to dub'].filter(Boolean).join(' · ')} <span>of ${r.total}</span>` +
       `${(r.split || []).length ? ` <span class="tag" title="Also in a folder Sonarr does not track: ${esc(r.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : ''}</div><div class="match">${match}</div><div class="acts">${acts}</div></li>`;
   }

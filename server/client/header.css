@@ -67,6 +67,15 @@
 .hint{color:var(--muted);font-size:12px}
 .count{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:500}
 
+/* Posters: the picture, or a tile of two letters on one of six muted tones (white on each is 5.6:1 or better) */
+:root{--p1:#3d5a80;--p2:#7a4b3a;--p3:#2f6f5e;--p4:#6b4f8a;--p5:#8a5a1c;--p6:#4a5560;--on-poster:#ffffff}
+.poster{flex:none;display:block;box-sizing:border-box;width:28px;height:42px;border-radius:4px;object-fit:cover;background:var(--surface-2)}
+.poster.tile{display:flex;align-items:flex-end;padding:3px;color:var(--on-poster);font:600 12px/1.2 var(--sans)}
+.poster.l{width:64px;height:96px;border-radius:8px}.poster.l.tile{font-size:15px;padding:6px 8px}
+.poster.xs{width:18px;height:27px;border-radius:3px}.poster.xs.tile{font-size:0;padding:0}
+.poster.none{background:transparent}
+.poster.p1{background:var(--p1)}.poster.p2{background:var(--p2)}.poster.p3{background:var(--p3)}.poster.p4{background:var(--p4)}.poster.p5{background:var(--p5)}.poster.p6{background:var(--p6)}
+
 /* Buttons: three ranks. Filled (.btn-primary) for the one action the screen is for, outlined (.btn) for the next
    one or two, quiet text (.btn-quiet) for the rest. Every button carries its verb's icon before its label. */
 :where(.ui) .btn{height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:flex-start;gap:8px;white-space:nowrap;transition:background-color var(--fast) var(--ease),border-color var(--fast) var(--ease),color var(--fast) var(--ease),transform var(--fast) var(--ease)}
@@ -124,12 +133,14 @@
 @media (max-width:720px){
   .top{column-gap:6px}
   .side{margin-left:auto;flex-wrap:wrap;justify-content:flex-end;gap:2px}
+  .brand{margin-right:0;min-width:24px}
   .side .btn{padding:0 8px}
   .nav{order:1;flex-basis:100%;min-width:0;flex-wrap:wrap;gap:0}
   .nav a{padding:6px 7px;font-size:13px}
   .lookup{order:2;flex-basis:100%}
   .skey{display:none}.searchbox input{padding-right:40px}
 }
+@media (max-width:480px){.brand span{display:none}}   /* the mark alone, so what is happening fits beside it on one row */
 @media (pointer:coarse){.searchbox input{min-height:44px}.sopt{padding:12px 10px}}
 /* A page with its own body styles wraps the header in .hdrwrap: a full-width strip, not sticky. */
 .hdrwrap{background:var(--bg);border-bottom:1px solid var(--line)}

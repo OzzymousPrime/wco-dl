@@ -310,6 +310,7 @@
   function renderShow(keepSelection) {
     $('empty').hidden = true; if ($('show').hidden) reveal($('show'));
     $('title').textContent = show.series.title;
+    if ($('showposter').dataset.id !== String(show.series.id)) { $('showposter').dataset.id = show.series.id; $('showposter').innerHTML = UI.poster(show.series.id, show.series.title, 'l'); }
     setTrail(show.series.title);
     $('path').textContent = show.series.path;
     const split = show.split || [];
@@ -627,7 +628,7 @@
       const bits = Object.keys(STATE_TEXT).filter((st) => n(st)).map((st) => `${n(st)} ${STATE_TEXT[st]}`).join(' · ');
       const rows = j.episodes.filter((e) => e.state !== 'cancelled' && (all || e.state !== 'done'));
       const hidden = j.episodes.filter((e) => e.state !== 'cancelled').length - rows.length;
-      return `<article class="qrun" data-id="${j.id}"><header><b>${esc(j.title)}</b>${j.auto ? '<span class="tag">overnight</span>' : ''}
+      return `<article class="qrun" data-id="${j.id}"><header>${UI.poster(j.seriesId, j.title)}<b>${esc(j.title)}</b>${j.auto ? '<span class="tag">overnight</span>' : ''}
         <span class="meta">${when(j.createdAt)} · ${j.language || 'default'} · ${bits}</span>
         <span class="grow"></span>${live && !j.episodes.some(isWorking) ? `<button class="btn" data-act="next" type="button" title="${j.auto ? 'Start this overnight run now, ahead of everything waiting' : 'Move this run to the head of the queue'}">${UI.icon('next')}${j.auto ? 'Run now' : 'Run next'}</button>` : ''}
         ${live ? `<button class="btn" data-act="cancel" type="button">${UI.icon('x')}Cancel</button>` : ''}
@@ -720,11 +721,14 @@
     $('fnone').hidden = !$('fnone').textContent;
     const html = list.map((x) => {
       const a = act.get(x.seriesId);
-      return `<li><a href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${esc(name(x))}</a>${x.language === 'sub' ? '<span class="tag">sub</span>' : ''}` +
+      const marks = (x.language === 'sub' ? '<span class="tag">sub</span>' : '') +
         (x.switchTo ? `<span class="tag" title="Numbered ${x.switchTo === 'absolute' ? 'straight through' : 'by season'}, wcostream would supply more of this show's missing episodes. Open the show to switch.">check numbering</span>` : '') +
         (x.unlisted > 0 ? `<span class="tag" title="Last night's plan found ${x.unlisted} episode${x.unlisted === 1 ? '' : 's'} that wcostream does not list, so they were not queued">${x.unlisted} not on wcostream</span>` : '') +
-        ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '') +
-        (needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>` : '') +
+        ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '');
+      const lacks = needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>`
+        : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;
+      return `<li data-slug="${esc(x.slug)}"><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
+        `<span class="ft"><b class="fname">${esc(name(x))}</b><span class="fmeta">${lacks}${marks}</span></span></a>` +
         (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') + '</li>';
     }).join('');
     if (html !== lastHome) { lastHome = html; $('followedlist').innerHTML = html; }
@@ -739,7 +743,7 @@
     const open = new Set([...document.querySelectorAll('#attnlist pre')].map((p) => p.dataset.key));
     const html = attention.map((a) => {
       const key = a.jobId + ':' + a.id;
-      return `<li data-job="${a.jobId}" data-ep="${a.id}"><span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
+      return `<li data-job="${a.jobId}" data-ep="${a.id}">${UI.poster(a.seriesId, a.show)}<span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
         <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
         <span class="acts">${a.state === 'premium' ? '' : `<button class="btn" data-a="retry" type="button">${UI.icon('retry')}Retry</button>`}<button class="linkbtn" data-a="log" type="button">Log</button>
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn" data-a="dismiss" type="button">Dismiss</button></span>

@@ -1,6 +1,8 @@
 # Wco-DL [![GitHub release](https://img.shields.io/github/release/Maximillion195/wco-dl.svg?style=flat-square)](https://github.com/Maximillion195/wco-dl/releases/latest) | [![Github All Releases](https://img.shields.io/github/downloads/Maximillion195/wco-dl/total.svg?style=flat-square)](https://github.com/Maximillion195/wco-dl/releases)
 
-wco-dl is a Command-line program and web application to download cartoons/anime/movies from WCOStream.tv.
+wco-dl is a Command-line program and web application to download cartoons/anime/movies from WCOStream.tv. With [Sonarr](https://sonarr.tv), it also shows which episodes of a show you are missing, downloads the ones you pick, and files each one under the right episode.
+
+![The episode map: five missing episodes are picked, downloaded and filed in Sonarr](docs/demo.gif)
 
 > Downloading and distributing this content may be illegal. This script was written for education purposes purely and you are responsible for its use.
 
@@ -25,6 +27,34 @@ docker compose up -d
 ```
 
 See [DOCKER.md](DOCKER.md) for detailed setup instructions.
+
+## What it looks like
+
+The screens below show demo data. How each one works is under [Episode Map and Overnight Gap Filler](#episode-map-and-overnight-gap-filler).
+
+### Episode map
+
+![Episode map of a show, with five missing episodes picked](docs/screenshots/map.png)
+
+Each square is one of the show's episodes in Sonarr: in your library, missing, not aired yet, or not on wcostream (dotted). Pick the ones you want and press **Download and import**. Links are matched to episodes by title, so a link that holds two episodes fills both.
+
+### Queue
+
+![The queue: one show downloading, another waiting, finished runs below](docs/screenshots/queue.png)
+
+Downloads run one at a time. The queue shows what is running, what is waiting and what has finished, with the downloader's log for each episode.
+
+### Library gaps
+
+![Library gaps: series with missing episodes, each matched to a wcostream show](docs/screenshots/library.png)
+
+Every animated series in Sonarr that has missing episodes, matched to wcostream by name. Follow a show and its gaps are filled overnight.
+
+### Dub calendar
+
+![Dub calendar: English dub episodes listed day by day](docs/screenshots/calendar.png)
+
+English dub episodes on the way for the shows in your library, from [AnimeSchedule](https://animeschedule.net). Dates marked "estimate" are worked out, not announced.
 
 ## Features
 

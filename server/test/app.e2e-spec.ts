@@ -337,6 +337,11 @@ describe('AppController (e2e)', () => {
     });
   });
 
+  it('answers 404, not an error page, for a poster when Sonarr is not set up', async () => {
+    await request(app.getHttpServer()).get('/poster/1').expect(404);
+    await request(app.getHttpServer()).get('/poster/abc').expect(404);
+  });
+
   it('returns 404 for unknown downloads', async () => {
     await request(app.getHttpServer()).get('/downloads/unknown').expect(404);
   });

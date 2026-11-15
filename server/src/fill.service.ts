@@ -287,6 +287,25 @@ export class FillService implements OnApplicationBootstrap {
     return list;
   }
 
+  /**
+   * A show's poster for the lists: Sonarr's own small copy (250 px wide, about 25 KB). The server fetches it, so the
+   * browser never holds the Sonarr key. No Sonarr, no poster yet, or anything that is not a picture: 404, and the
+   * screen draws the show's initials instead.
+   */
+  async poster(seriesId: number): Promise<{ data: Buffer; type: string }> {
+    const { sonarrUrl, sonarrApiKey } = this.config;
+    if (!sonarrApiKey || !Number.isInteger(seriesId) || seriesId <= 0) throw new NotFoundException('No poster');
+    try {
+      const r = await axios.request<ArrayBuffer>({ method: 'get', url: `${sonarrUrl}/api/v3/mediacover/${seriesId}/poster-250.jpg`,
+        responseType: 'arraybuffer', timeout: 20000, headers: { 'X-Api-Key': sonarrApiKey } });
+      const type = String(r.headers?.['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+      if (!type.startsWith('image/')) throw new Error('not a picture');
+      return { data: Buffer.from(r.data), type };
+    } catch {
+      throw new NotFoundException('No poster');
+    }
+  }
+
   /** The Windows path Sonarr sees for a folder under OUTPUT_BASE (see SONARR_IMPORT_BASE). */
   private sonarrPath(folder: string): string {
     const { outputBase, sonarrImportBase } = this.config;

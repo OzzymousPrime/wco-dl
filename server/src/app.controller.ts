@@ -3,12 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   NotFoundException,
   Param,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { AppService } from './app.service';
@@ -62,6 +64,14 @@ export class AppController {
   @Get('show/wco')
   showWco(@Query('url') url: string, @Query('seriesId') seriesId?: string, @Query('lang') lang?: string, @Query('absolute') absolute?: string) {
     return this.fillService.wcoCheck(url, seriesId, lang, absolute);
+  }
+
+  // A show's small poster, for the lists. Fetched from Sonarr by the server and kept by the browser for a day.
+  @Get('poster/:seriesId')
+  @Header('Cache-Control', 'private, max-age=86400')
+  async poster(@Param('seriesId') seriesId: string): Promise<StreamableFile> {
+    const { data, type } = await this.fillService.poster(Number(seriesId));
+    return new StreamableFile(data, { type, length: data.length });
   }
 
   @Get('series-search')

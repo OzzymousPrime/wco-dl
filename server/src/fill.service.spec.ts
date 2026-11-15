@@ -454,3 +454,32 @@ describe('show links and follows', () => {
     expect(await fs.readFile(prefsFile, 'utf8')).toBe('{"first-show": {"seriesId"');
   });
 });
+
+describe('posters', () => {
+  const config = (key?: string) => ({ sonarrUrl: 'http://sonarr', sonarrApiKey: key, configDir: os.tmpdir(), outputBase: os.tmpdir() } as unknown as AppConfig);
+  afterEach(() => jest.restoreAllMocks());
+
+  it("hands back Sonarr's small poster, asked for with the key the browser never sees", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    const spy = jest.spyOn(axios, 'request').mockResolvedValue({ data: jpeg, headers: { 'content-type': 'image/jpeg' } } as any);
+    const got = await new FillService(config('k')).poster(42);
+    expect(got.type).toBe('image/jpeg');
+    expect(Buffer.compare(got.data, jpeg)).toBe(0);
+    const req = spy.mock.calls[0][0] as any;
+    expect(req.url).toBe('http://sonarr/api/v3/mediacover/42/poster-250.jpg');
+    expect(req.headers['X-Api-Key']).toBe('k');
+    expect(req.responseType).toBe('arraybuffer');
+  });
+
+  it('answers 404 when there is no poster to give, and never asks Sonarr without a key or a real id', async () => {
+    const spy = jest.spyOn(axios, 'request');
+    await expect(new FillService(config()).poster(42)).rejects.toThrow('No poster');          // Sonarr not set up
+    await expect(new FillService(config('k')).poster(NaN)).rejects.toThrow('No poster');      // "/poster/abc"
+    await expect(new FillService(config('k')).poster(-1)).rejects.toThrow('No poster');
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRejectedValueOnce(new Error('Request failed with status code 404'));              // Sonarr has no poster yet
+    await expect(new FillService(config('k')).poster(42)).rejects.toThrow('No poster');
+    spy.mockResolvedValueOnce({ data: Buffer.from('<html>sign in</html>'), headers: { 'content-type': 'text/html; charset=utf-8' } } as any);
+    await expect(new FillService(config('k')).poster(42)).rejects.toThrow('No poster');       // a login page is not a picture
+  });
+});

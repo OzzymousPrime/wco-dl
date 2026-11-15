@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class="page">
-  <div class="top">
+  <header class="top">
     <a class="brand" href="/"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
     <nav class="nav" aria-label="Screens"><a href="/map.html">Episode map</a><a href="/library.html" aria-current="page">Library gaps</a><a href="/calendar.html">Dub calendar</a><a href="/map.html#attention">Needs you <span class="count" id="attncount"></span></a></nav>
     <span class="grow"></span>
@@ -18,8 +18,9 @@
     <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">
       <svg class="ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
     </button>
-  </div>
+  </header>
 
+  <main>
   <div id="status" class="status">Reading Sonarr and wcostream's catalogue. The first time can take a minute.</div>
 
   <div id="lib" hidden>
@@ -41,8 +42,9 @@
     <p class="hint">Following a show links it and lets the overnight run (between <span data-night>01:00 and 07:00</span>, <span data-budget>120</span> episodes a night, shortest lists first) fill its gaps. Nothing downloads when you press Follow.</p>
     <div id="rows"></div>
   </div>
-</div>
 <div class="toast" id="toast" role="status"></div>
+  </main>
+</div>
 <script src="ui.js"></script>
 <script src="library.js"></script>
 </body>

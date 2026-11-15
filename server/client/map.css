@@ -461,3 +461,45 @@ dialog.settings .hint{margin:0}
 .cal .wco{color:var(--muted);font-size:12px}
 .cal .btn{height:32px}
 @media (max-width:720px){.cal li{grid-template-columns:56px minmax(0,1fr)}}
+
+/* Design and accessibility pass (15 Nov 2026) */
+/* 1. An episode wcostream cannot supply says so on the square: "n/a", in the tone of "EN"; the legend names it */
+.cell.missing.nowco:not([class*=" f-"]) .au{color:var(--text-2)}
+.sw.off{background:transparent;border:1px dotted var(--line-strong)}
+.legend .au{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+/* 2. Phone: the key and the numbering switch sit inside the how-to (map.js moves them) and "Select all" shares its line */
+.help .narrow{display:none}
+@media (max-width:720px){
+  .help .wide{display:none}.help .narrow{display:inline}
+  #tools{float:right;margin:0 0 8px 12px}#tools .grow{display:none}
+  .help > :not(summary){clear:both}
+  .help .legend,.help .seg{margin-top:8px}.help .seg{font-size:14px}
+  #map{clear:both}
+  .slabel{flex-direction:row;gap:8px;align-items:baseline}
+}
+/* 3. Labels in the squares at 12px. Six letters ("import", "Sonarr") fit a 48px square only without tracking, and a 44px phone square only at 11px */
+.cell .au{font-size:12px}
+.cell .au.long{letter-spacing:0}
+@media (max-width:720px){.cell .au.long{font-size:11px}}
+/* 4. Narrow screens: the screens nav and the filter tabs wrap instead of running off the edge; a queue row's status goes under its title */
+@media (max-width:720px){
+  .top .nav{flex-wrap:wrap;overflow:visible}
+  .tools .seg{flex-wrap:wrap;overflow:visible}
+  .qeps li{grid-template-columns:48px minmax(0,1fr)}
+  .qeps .st{grid-column:2;white-space:normal}
+}
+/* 5. One h1 in every view: the page's own is for screen readers and steps aside when a show, whose title is the h1, is open */
+.vh{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+main:has(#show:not([hidden])) #pagetitle{display:none}
+/* 6. Text links are at least 24px tall (and "Log" 24px wide) to press; the negative margin keeps rows and baselines where they were */
+.linkbtn{display:inline-block;line-height:18px;padding:3px 2px;margin:-3px -2px}
+#found li .linkbtn{display:inline-block;padding:3px 0}
+@media (pointer:fine){.where button{padding:3px 0;margin:-3px 0}}
+.flist a{padding:2px 0;margin-top:-2px;margin-bottom:-2px}
+.foot a,.credit a,.dubnote a{display:inline-block;padding:4px 0;margin:-4px 0}
+.brand{min-height:24px}
+/* 7. Run strip bar: a segment per episode. Same 4px height and 12px margin as .prog, so the strip does not move */
+.runbar{display:flex;gap:2px;height:4px;margin-top:12px}
+.runbar span{flex:1;min-width:0;border-radius:2px;background:var(--surface-2);overflow:hidden}
+.runbar .ok{background:var(--accent)}.runbar .bad{background:var(--err)}.runbar .off{background:var(--muted)}
+.runbar i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width var(--mid) var(--ease)}

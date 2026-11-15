@@ -10,7 +10,10 @@
   const audioName = (a) => (!a ? 'unknown' : a.split('/').map((x) => ({ eng: 'English', jpn: 'Japanese' }[x] || x)).join(' and '));
   const lang = () => $('lang').querySelector('[aria-pressed=true]').dataset.v;
   // In Sub mode a Japanese-audio file is what you want, so only missing episodes need work.
-  const actionable = (e) => !e.nowco && (e.st === 'missing' || (e.st === 'undub' && lang() === 'dub'));
+  const wanted = (e) => e.st === 'missing' || (e.st === 'undub' && lang() === 'dub');
+  const actionable = (e) => !e.nowco && wanted(e);
+  // Needs work, but wcostream cannot supply it: a state of its own, said on the square ("n/a"), in its label and in its tooltip.
+  const offWco = (e) => !!e.nowco && wanted(e);
   // A file whose audio is not labelled may already be English: it is never part of "select all" or a season click,
   // and the overnight run leaves it alone, but it can be picked by hand to replace it with the dub.
   const isSwap = (e) => e.st === 'undub' || e.st === 'unknown';
@@ -183,7 +186,7 @@
   function reveal(el) { el.hidden = false; el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter'); }
   const lastWidth = new Map();
   function smooth(box, key) {
-    const bar = box.querySelector('.prog i'); if (!bar) { lastWidth.delete(key); return; }
+    const bar = box.querySelector('.prog i, .runbar i'); if (!bar) { lastWidth.delete(key); return; }
     const to = bar.style.width, from = lastWidth.get(key);
     if (from && from !== to) { bar.style.width = from; void bar.offsetWidth; bar.style.width = to; }
     lastWidth.set(key, to);
@@ -357,13 +360,13 @@
     const f = fills.get(e.id), live = f && f.state !== 'cancelled';
     const was = e.fs; e.fs = live ? f.state : '';
     e.el.className = 'cell ' + e.st + (e.nowco ? ' nowco' : '') + (live ? ' f-' + f.state : '') + (e.fs === 'done' && was && was !== 'done' ? ' pop' : '');
-    const au = live ? (f.state === 'downloading' ? `${f.progress ?? 0}%` : FILL_LABEL[f.state]) : e.st === 'dub' ? 'EN' : e.st === 'undub' ? 'JP' : e.st === 'unknown' ? '?' : '';
-    e.el.innerHTML = `<span class="n">${show.absolute && e.abs ? e.abs : e.e}</span>${au ? `<span class="au">${au}</span>` : ''}`;
+    const au = live ? (f.state === 'downloading' ? `${f.progress ?? 0}%` : FILL_LABEL[f.state]) : offWco(e) ? 'n/a' : e.st === 'dub' ? 'EN' : e.st === 'undub' ? 'JP' : e.st === 'unknown' ? '?' : '';
+    e.el.innerHTML = `<span class="n">${show.absolute && e.abs ? e.abs : e.e}</span>${au ? `<span class="au${au.length > 5 ? ' long' : ''}">${au}</span>` : ''}`;
     e.el.style.setProperty('--p', (live && f.state === 'downloading' ? f.progress ?? 0 : live && f.state === 'importing' ? 100 : 0) + '%');
     selectable(e) ? e.el.removeAttribute('aria-disabled') : e.el.setAttribute('aria-disabled', 'true');
     e.el.setAttribute('aria-checked', sel.has(e.i) ? 'true' : 'false');
     const runWords = live ? `, this run: ${f.state === 'downloading' ? `downloading ${f.progress ?? 0}%` : f.message || f.state}` : '';
-    e.el.setAttribute('aria-label', `${e.s}x${pad(e.e)} ${e.t}, ${STATE_WORDS[e.st]}${runWords}`);
+    e.el.setAttribute('aria-label', `${e.s}x${pad(e.e)} ${e.t}, ${STATE_WORDS[e.st]}${offWco(e) ? ', not on wcostream' : ''}${runWords}`);
   }
 
   function render() {
@@ -443,18 +446,18 @@
       : sel.has(e.i) ? 'Selected: your file will be replaced by the English dub' : 'Click to swap it for the English dub')
       : e.st === 'missing' ? (sel.has(e.i) ? 'Selected: will be downloaded' : 'Click to download it') : '';
     const mates = (wcoTogether[e.id] || []).filter((id) => id !== e.id).map((id) => eps.find((x) => x.id === id)).filter(Boolean).map((x) => `${x.s}x${pad(x.e)}`);
-    const note = e.nowco && !run ? 'wcostream cannot supply this episode: it is not listed, or its episode of this number is a different one'
+    const note = e.nowco && e.st !== 'future' && !run ? 'Not on wcostream: it does not list this episode, or its episode of this number is a different one'
       : mates.length && actionable(e) ? `${act ? act + '. ' : ''}On wcostream this comes in one file with ${mates.join(' and ')}` : act;
     tip.innerHTML = `<div class="k">${e.s}x${pad(e.e)}${e.abs ? ` · #${e.abs}` : ''}</div><div class="t">${esc(e.t)}</div><dl>
-      <dt>Aired</dt><dd>${fmtDate(e.a)}</dd><dt>Status</dt><dd>${STATE_WORDS[e.st].replace(/^./, (x) => x.toUpperCase())}</dd>
+      <dt>Aired</dt><dd>${fmtDate(e.a)}</dd><dt>Status</dt><dd>${STATE_WORDS[e.st].replace(/^./, (x) => x.toUpperCase())}${offWco(e) ? ', not on wcostream' : ''}</dd>
       ${e.f ? `<dt>Audio</dt><dd>${esc(audioName(e.au))}</dd><dt>Quality</dt><dd>${esc(e.q)}</dd><dt>File</dt><dd>${esc(e.f)}</dd>` : ''}
       ${run ? `<dt>This run</dt><dd>${esc(run)}</dd>` : ''}</dl>${note ? `<div class="act">${note}</div>` : ''}`;
     const r = c.getBoundingClientRect(), w = 300;
     const x = Math.max(12, Math.min(innerWidth - w - 12, r.left + r.width / 2 - w / 2));
-    tip.classList.add('on'); const h = tip.offsetHeight; let y = r.top - h - 8; if (y < 12) y = r.bottom + 8;
+    tip.classList.add('on'); tip.removeAttribute('aria-hidden'); const h = tip.offsetHeight; let y = r.top - h - 8; if (y < 12) y = r.bottom + 8;
     tip.style.left = x + 'px'; tip.style.top = y + 'px';
   }
-  function hideTip() { tip.classList.remove('on'); }
+  function hideTip() { tip.classList.remove('on'); tip.setAttribute('aria-hidden', 'true'); }   // role=tooltip with nothing to say is hidden from readers
 
   // ---------- Actions ----------
   function ranges(list) {
@@ -491,7 +494,7 @@
   const isLive = (j) => j.episodes.some((e) => ACTIVE.includes(e.state));
   const isWorking = (e) => e.state === 'downloading' || e.state === 'importing';
   const when = (s) => new Date(s).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const prog = (p, label) => `<div class="prog" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><i style="width:${p}%"></i></div>`;
+  const prog = (p, label, text) => `<div class="prog" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"${text ? ` aria-valuetext="${esc(text)}"` : ''}><i style="width:${p}%"></i></div>`;
   let allRuns = [], queueErr = '', pollT = null, pollSeq = 0;
   let qstate = { paused: false }, attention = [], attnAt = 0, attnAt0 = false;
   async function loadAttention(force) {
@@ -544,8 +547,17 @@
     const n = (s) => f.filter((e) => e.state === s).length;
     const active = f.some((e) => ACTIVE.includes(e.state)), cur = f.find(isWorking);
     const settled = f.length - n('queued') - n('downloading') - n('importing');
-    // The bar is the episode in hand, as in the queue panel: the words beside it ("2 of 5 finished") are the run.
-    const pct = cur ? (cur.state === 'importing' ? 100 : cur.progress ?? 0) : 0;
+    // The bar is the run and the episode at once (15 Nov 2026): one segment per episode in the order they run, full when
+    // settled (the error tone for failed or kept, grey for one handed to Sonarr), filled to its percentage while in hand.
+    // Past 30 episodes the segments would be slivers, so it is one bar again: (settled + the part in hand) / all.
+    const part = cur ? (cur.state === 'importing' ? 100 : cur.progress ?? 0) : 0;
+    const whole = Math.round(((settled + part / 100) / f.length) * 100);
+    const order = [...runs].reverse().flatMap((j) => j.episodes).filter((e) => fills.get(e.id) === e && e.state !== 'cancelled');
+    const say = cur ? `Episode ${order.indexOf(cur) + 1} of ${f.length}, ${cur.state === 'importing' ? 'importing' : part + '%'}` : `${settled} of ${f.length} finished`;
+    const runbar = f.length > 30 ? prog(whole, "This show's run", say)
+      : `<div class="runbar" role="progressbar" aria-label="This show's run" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${whole}" aria-valuetext="${esc(say)}">` +
+        order.map((e) => (e === cur ? `<span><i style="width:${part}%"></i></span>`
+          : `<span${e.state === 'done' ? ' class="ok"' : e.state === 'failed' || e.state === 'kept' ? ' class="bad"' : e.state === 'premium' ? ' class="off"' : ''}></span>`)).join('') + '</div>';
     const busyUntil = f.filter((e) => e.state === 'queued' && e.notBefore && new Date(e.notBefore) > new Date()).map((e) => e.notBefore).sort()[0];
     const head = cur ? (cur.state === 'importing' ? 'Importing' : 'Downloading')
       : !active ? 'Last run'
@@ -565,8 +577,8 @@
       `<button class="linkbtn" id="runqueue" type="button">Details and logs</button>` +
       (active ? '<button class="btn" id="cancel" type="button">Cancel</button>' : '') +
       (retryable ? '<button class="btn" id="retry" type="button">Retry failed (resumes partial downloads)</button>' : '') + '</div>' +
-      (active ? prog(pct, 'Current episode') : '');
-    smooth($('run'), 'run');
+      (active ? runbar : '');
+    smooth($('run'), 'run' + (cur ? cur.id : ''));   // a new episode starts its segment from empty, it does not slide back from the last one's
     $('cancel')?.addEventListener('click', () => runAction('cancel', runs.filter(isLive)));
     $('retry')?.addEventListener('click', () => runAction('retry', runs));
     $('runqueue')?.addEventListener('click', () => openQueue(true));
@@ -761,6 +773,14 @@
   $('ffilter').addEventListener('input', renderHome);
   $('fkind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setSeg('fkind', b.dataset.v); renderHome(); } });
   $('ffilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('followedlist').querySelector('a')?.click(); });
+
+  // On a phone the key to the squares and the numbering switch live inside the how-to, so the squares start sooner (15 Nov 2026).
+  const phone = matchMedia('(max-width:720px)');
+  function place() {
+    if (phone.matches) $('help').querySelector('summary').after($('legend'), $('numbering'));
+    else { $('tools').prepend($('legend')); $('controls').prepend($('numbering')); }
+  }
+  phone.addEventListener('change', place); place();
 
   // The how-to stays folded once read; the choice is remembered on this device.
   try { $('help').open = localStorage.getItem('wco-help') === 'open'; } catch { /* private window: stay folded */ }

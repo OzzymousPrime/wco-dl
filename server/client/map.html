@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class="page">
-  <div class="top">
+  <header class="top">
     <a class="brand" href="/"><img src="favicon.svg" width="20" height="20" alt="">wco-dl</a>
     <nav class="nav" aria-label="Screens"><a href="/map.html" aria-current="page">Episode map</a><a href="/library.html">Library gaps</a><a href="/calendar.html">Dub calendar</a><a href="/map.html#attention">Needs you <span class="count" id="attncount"></span></a></nav>
     <form class="lookup" id="lookup" role="search">
@@ -28,8 +28,10 @@
     <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">
       <svg class="ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
     </button>
-  </div>
+  </header>
 
+  <main>
+  <h1 class="vh" id="pagetitle">Episode map</h1>
   <div id="status" class="status" hidden></div>
 
   <section class="queue" id="queue" hidden aria-label="Queue">
@@ -62,7 +64,7 @@
         <div class="dubnote" id="dubnote" hidden></div>
         <div class="dubnote" id="wconote" hidden></div>
       </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div id="controls" style="display:flex;gap:12px;flex-wrap:wrap">
         <div class="seg" role="group" aria-label="Numbering" id="numbering">
           <button type="button" data-v="false" aria-pressed="true">By season</button><button type="button" data-v="true" aria-pressed="false">Straight through</button>
         </div>
@@ -75,19 +77,20 @@
 
     <div id="run" class="run" hidden></div>
 
-    <div class="tools">
-      <div class="legend">
+    <div class="tools" id="tools">
+      <div class="legend" id="legend">
         <span><i class="sw"></i>In library, English</span>
         <span><i class="sw jp"></i>Not in English</span>
         <span><i class="sw"></i>? audio not labelled</span>
         <span><i class="sw miss"></i>Missing</span>
+        <span><i class="sw off"></i><span class="au">n/a</span>Not on wcostream</span>
         <span><i class="sw sel"></i>Selected</span>
         <span><i class="sw soon"></i>Not aired</span>
       </div>
       <span class="grow"></span>
       <button class="btn" id="all" type="button">Select all that need work</button>
     </div>
-    <details class="help" id="help"><summary>How to select, and what the squares say during a run</summary>
+    <details class="help" id="help"><summary><span class="wide">How to select, and what the squares say during a run</span><span class="narrow">Key, numbering and help</span></summary>
       <p>Click or drag to select · <kbd>Shift</kbd> click for a range · click a season name for the whole season · arrows and <kbd>Space</kbd> with the keyboard · <kbd>Esc</kbd> clears</p>
       <p>During a run a square shows <b>queue</b>, the download %, <b>import</b>, <b>done</b>, <b>Sonarr</b> (premium only on wcostream, so Sonarr searches for it), <b>check</b> (downloaded but not imported) or <b>fail</b>. Hover a square for the reason.</p>
     </details>
@@ -110,9 +113,8 @@
     <p class="empty" id="fnone" hidden></p>
     <p class="hint foot"><a href="/index.html">The original downloader page</a></p>
   </div>
-</div>
 
-<div class="tip" id="tip" role="tooltip"></div>
+<div class="tip" id="tip" role="tooltip" aria-hidden="true"></div>
 
 <div class="bar" id="bar"><div class="in">
   <div class="sum" id="sum" aria-live="polite"></div>
@@ -124,6 +126,8 @@
     <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg><span id="golabel">Download and import</span></button>
 </div></div>
 <div class="toast" id="toast" role="status"></div>
+  </main>
+</div>
 <script src="ui.js"></script>
 <script src="map.js"></script>
 </body>

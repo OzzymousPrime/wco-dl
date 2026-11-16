@@ -121,7 +121,7 @@
 .sopt[aria-selected=true]{background:var(--surface-2)}
 .sopt .ico{color:var(--text-2)}
 .sname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.smeta{margin-left:auto;flex:none;font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.smeta{margin-left:auto;flex:none;font-size:12px;color:var(--text-2);white-space:nowrap;font-variant-numeric:tabular-nums}   /* --muted is 4.2:1 on a selected row */
 .snote{padding:10px;font-size:12px;color:var(--muted)}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}}   /* no "to": it ends at the element's own look, so a not-aired square stays dim */
 
@@ -142,7 +142,11 @@
   .lookup{order:2;flex-basis:100%}
   .skey{display:none}.searchbox input{padding-right:40px}
 }
-@media (max-width:480px){.brand span{display:none}}   /* the mark alone, so what is happening fits beside it on one row */
+@media (max-width:480px){   /* the mark alone and tighter buttons, so what is happening fits beside it on one row */
+  .brand span{display:none}
+  .side,.happening,.looktools{gap:0}
+  .side .btn{padding:0 6px;gap:6px}
+}
 @media (max-width:360px){   /* narrower still: the mark and the tools share the first row, what is happening has the second */
   .side{display:contents}
   .looktools{margin-left:auto}

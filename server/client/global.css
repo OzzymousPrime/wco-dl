@@ -11,10 +11,14 @@
   --bg-secondary: #f5f5f5;
   --bg-tertiary: #e0e0e0;
   --text-primary: #212121;
-  --text-secondary: #757575;
+  --text-secondary: #6b6b6b; /* was #757575: 4.2:1 on the grey panels; now 4.9:1 there and 5.3:1 on white */
   --border-color: #e0e0e0;
   --accent-color: #6366f1;
   --accent-hover: #4f46e5;
+  /* A filled control (the chosen tab, a primary button): white on #6366f1 was 4.46:1, on the dark theme's #818cf8 2.98:1 */
+  --accent-fill: #4f46e5;
+  --accent-fill-hover: #4338ca;
+  --on-accent: #ffffff;
   --success-color: #10b981;
   --warning-color: #f59e0b;
   --error-color: #ef4444;
@@ -31,6 +35,9 @@
   --border-color: #404040;
   --accent-color: #818cf8;
   --accent-hover: #6366f1;
+  --accent-fill: #818cf8;
+  --accent-fill-hover: #a5b4fc;
+  --on-accent: #111111;
   --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   --modal-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
@@ -65,6 +72,11 @@ header h1 {
 .subtitle {
   color: var(--text-secondary);
   font-size: 1.1rem;
+}
+
+.subtitle a {
+  display: inline-block;
+  padding: 3px 0; /* 24px tall to press */
 }
 
 .theme-toggle {
@@ -116,9 +128,9 @@ header h1 {
 }
 
 .tab.active {
-  background: var(--accent-color);
-  color: white;
-  border-color: var(--accent-color);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border-color: var(--accent-fill);
 }
 
 /* Search */
@@ -404,12 +416,12 @@ header h1 {
 }
 
 .btn-primary {
-  background: var(--accent-color);
-  color: white;
+  background: var(--accent-fill);
+  color: var(--on-accent);
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
   transform: translateY(-1px);
 }
 

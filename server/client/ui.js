@@ -296,7 +296,7 @@
     const choose = (x) => { if (!x) return; close(); box.value = ''; clear.hidden = true; key.hidden = false; box.blur(); x.run(); };
     box.addEventListener('input', suggest);
     box.addEventListener('focus', suggest);
-    box.addEventListener('blur', () => setTimeout(close, 120));
+    box.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== box) close(); }, 120));   // not if the box was reached again meanwhile
     box.addEventListener('paste', () => setTimeout(() => { if (isLink(box.value)) { const v = box.value.trim(); close(); box.value = ''; clear.hidden = true; key.hidden = false; (UI.hooks.link || ((u) => go('/map.html?url=' + encodeURIComponent(u))))(v); } }, 0));
     box.addEventListener('keydown', (ev) => {
       const open = !panel.hidden, n = sug.items.length;

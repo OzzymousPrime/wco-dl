@@ -72,7 +72,7 @@
   function showHome() {
     view = 'home'; show = null; link = ''; sel.clear(); fills = new Map();
     $('show').hidden = true; $('picker').hidden = true; $('found').hidden = true; $('run').hidden = true; $('bar').classList.remove('on');
-    $('empty').hidden = false; status(''); setTrail(''); hideTip();
+    $('empty').hidden = false; status(''); setTrail(''); hideTip(); document.documentElement.style.setProperty('--sbarh', '0px');
     document.title = BASE_TITLE;
     renderHome();
   }
@@ -402,7 +402,7 @@
     if (!eps.length) { map.innerHTML = '<p class="empty">Sonarr has no episodes for this show yet.</p>'; render(); return; }
     for (const s of [...new Set(eps.map((e) => e.s))]) {
       const list = eps.filter((e) => e.s === s), work = list.filter(actionable);
-      const row = document.createElement('div'); row.className = 'season';
+      const row = document.createElement('div'); row.className = 'season'; row.dataset.s = s;
       const lab = document.createElement('button'); lab.className = 'slabel'; lab.type = 'button'; lab.dataset.s = s;
       lab.innerHTML = `<b>Season ${s}</b><span></span>`;
       lab.onclick = () => {
@@ -429,6 +429,51 @@
     }
     render();
   }
+  // ---------- Season bar (15 Nov 2026): on a show with more than one season, a bar that stays under the header ----------
+  // The show's title and a chip per season with how many of its episodes need work. A chip scrolls to its season; the
+  // chip of the season being read is marked (aria-current) as the page scrolls. It scrolls sideways inside itself
+  // when the chips do not fit, so it is always one line.
+  let lastSbar = '', pinned = null;
+  for (const type of ['wheel', 'touchmove', 'keydown']) addEventListener(type, () => { pinned = null; }, { passive: true });
+  function drawSbar() {
+    const seasons = show?.series ? [...new Set(eps.map((e) => e.s))] : [];
+    $('sbar').hidden = seasons.length < 2;
+    if ($('sbar').hidden) { lastSbar = ''; document.documentElement.style.setProperty('--sbarh', '0px'); return; }
+    $('sbartitle').textContent = show.series.title;
+    const html = seasons.map((s) => {
+      const n = eps.filter((e) => e.s === s && actionable(e)).length, name = s === 0 ? 'Specials' : 'Season ' + s;
+      return `<button class="chip" type="button" data-s="${s}" aria-label="${name}, ${n ? n + ' need work' : 'nothing to do'}">${s === 0 ? 'Specials' : 'S' + s}${n ? ` <span class="count">${n}</span>` : ''}</button>`;
+    }).join('');
+    if (html !== lastSbar) { lastSbar = html; $('chips').innerHTML = html; }
+    document.documentElement.style.setProperty('--sbarh', $('sbar').offsetHeight + 'px');
+    markSeason();
+  }
+  function markSeason() {
+    if ($('sbar').hidden) return;
+    const line = $('sbar').getBoundingClientRect().bottom + 24;
+    let cur = null;
+    for (const row of $('map').querySelectorAll('.season')) { if (cur === null || row.getBoundingClientRect().top <= line) cur = row.dataset.s; }
+    if (pinned !== null) cur = pinned;                 // a season near the end cannot reach the top: the chip pressed still counts
+    for (const c of $('chips').children) {
+      const on = c.dataset.s === cur;
+      if (on === (c.getAttribute('aria-current') === 'true')) continue;
+      if (on) {
+        c.setAttribute('aria-current', 'true');
+        const box = $('chips'), l = c.offsetLeft - box.offsetLeft;   // keep the marked chip in sight inside the bar, without moving the page
+        if (l < box.scrollLeft) box.scrollLeft = l - 8; else if (l + c.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = l + c.offsetWidth - box.clientWidth + 8;
+      } else c.removeAttribute('aria-current');
+    }
+  }
+  addEventListener('scroll', markSeason, { passive: true });
+  addEventListener('resize', () => { if (!$('sbar').hidden) document.documentElement.style.setProperty('--sbarh', $('sbar').offsetHeight + 'px'); });
+  $('chips').addEventListener('click', (ev) => {
+    const c = ev.target.closest('.chip'); if (!c) return;
+    const row = $('map').querySelector(`.season[data-s="${c.dataset.s}"]`); if (!row) return;
+    pinned = c.dataset.s;
+    row.scrollIntoView({ block: 'start', behavior: reduce.matches ? 'auto' : 'smooth' });
+    markSeason();
+    row.querySelector('.slabel')?.focus({ preventScroll: true });   // the keyboard carries on from that season
+  });
   function toggleFold(s) { open.has(s) ? open.delete(s) : open.add(s); renderShow(true); }
 
   const selectable = (e) => pickable(e) && !(fills.get(e.id) && ACTIVE.includes(fills.get(e.id).state));
@@ -455,6 +500,7 @@
       (sw ? `<span class="warn">Swapped files go to Sonarr's recycle bin, kept 7 days</span>` : '');
     confirmSwap = false;
     $('golabel').textContent = sw ? `Swap ${sw} to dub${mi ? ` · download ${mi}` : ''}` : `Download ${mi} episode${mi === 1 ? '' : 's'}`;
+    drawSbar();
     const gaps = eps.filter((e) => e.el && actionable(e) && selectable(e)).length;
     $('all').hidden = !gaps;
     $('alllabel').textContent = `Select the ${gaps} gap${gaps === 1 ? '' : 's'}`;
@@ -658,7 +704,7 @@
     $('run').innerHTML = `<div class="runrow"><b>${head}</b><span class="what">${detail}</span><span class="grow"></span><span class="meta">${bits}</span>` +
       `<button class="linkbtn" id="runqueue" type="button">Details and logs</button>` +
       (active ? `<button class="btn" id="cancel" type="button">${UI.icon('x')}Cancel</button>` : '') +
-      (retryable ? `<button class="btn" id="retry" type="button">${UI.icon('retry')}Retry failed (resumes partial downloads)</button>` : '') + '</div>' +
+      (retryable ? `<button class="btn" id="retry" type="button" title="Tries them again; a partial download resumes">${UI.icon('retry')}Retry ${n('kept') + n('failed')}</button>` : '') + '</div>' +
       (active ? runbar : '');
     smooth($('run'), 'run' + (cur ? cur.id : ''));   // a new episode starts its segment from empty, it does not slide back from the last one's
     $('cancel')?.addEventListener('click', () => runAction('cancel', runs.filter(isLive)));
@@ -711,7 +757,7 @@
         <span class="meta">${when(j.createdAt)} · ${j.language || 'default'} · ${bits}</span>
         <span class="grow"></span>${live && !j.episodes.some(isWorking) ? `<button class="btn" data-act="next" type="button" title="${j.auto ? 'Start this overnight run now, ahead of everything waiting' : 'Move this run to the head of the queue'}">${UI.icon('next')}${j.auto ? 'Run now' : 'Run next'}</button>` : ''}
         ${live ? `<button class="btn btn-quiet" data-act="cancel" type="button">${UI.icon('x')}Cancel</button>` : ''}
-        ${!live && (n('failed') || n('kept') || n('cancelled')) ? `<button class="btn" data-act="retry" type="button">${UI.icon('retry')}Retry (resumes partial downloads)</button>` : ''}
+        ${!live && (n('failed') || n('kept') || n('cancelled')) ? `<button class="btn" data-act="retry" type="button" title="Tries them again; a partial download resumes">${UI.icon('retry')}Retry ${n('failed') + n('kept') + n('cancelled')}</button>` : ''}
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(j.slug)}">Open map</a></header>
         <ul class="qeps">${rows.map((e) => {
           const key = j.id + ':' + e.id, bad = e.state === 'failed' || e.state === 'kept';

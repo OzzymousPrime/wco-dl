@@ -403,3 +403,18 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
   .aeps li{grid-template-columns:48px minmax(0,1fr)}
   .aeps .acts{grid-column:1/-1;justify-content:flex-start}
 }
+
+/* Season bar that stays put (15 Nov 2026): under the header (--toph, set by ui.js), above the squares. One line:
+   the chips scroll sideways inside it when they do not fit. Below the header and the tooltip, clear of the bottom bar. */
+.sbar{position:sticky;top:var(--toph,0px);z-index:12;clear:both;display:flex;gap:12px;align-items:center;min-width:0;margin:0 -24px 8px;padding:6px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
+.sbar b{flex:0 1 auto;min-width:0;max-width:40%;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips{flex:1 1 0;min-width:0;display:flex;gap:6px;padding:2px;overflow-x:auto;scrollbar-width:thin}
+.chip{flex:none;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:transparent;cursor:pointer;font-size:13px;color:var(--text-2);display:inline-flex;gap:6px;align-items:center;white-space:nowrap;transition:background-color var(--fast) var(--ease)}
+.chip:hover{background:var(--surface-2)}
+.chip[aria-current=true]{background:var(--surface-2);border-color:var(--line-strong);color:var(--text)}
+.chip:focus-visible{outline-offset:0}
+/* A season jumped to, or a square reached with the keyboard, stops clear of the header and this bar, and of the selection bar below */
+.season{scroll-margin-top:calc(var(--toph,0px) + var(--sbarh,0px) + 4px)}
+.cell,.slabel,.fold-btn{scroll-margin-top:calc(var(--toph,0px) + var(--sbarh,0px) + 12px);scroll-margin-bottom:96px}
+@media (max-width:720px){.sbar{margin:0 -16px 8px;padding:6px 16px}.sbar b{max-width:36%}}
+@media (pointer:coarse){.chip{min-height:44px}}

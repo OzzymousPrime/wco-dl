@@ -100,7 +100,7 @@
 .nav a:hover{background:var(--surface-2)}
 .nav a[aria-current]{color:var(--text);background:var(--surface-2)}
 .lookup{flex:1 1 220px;display:flex;min-width:0}
-.side{display:flex;gap:4px;align-items:center}
+.side,.happening,.tools{display:flex;gap:4px;align-items:center}
 .side .btn-quiet{padding:0 10px}
 
 /* Search box with its panel of results (11 Nov 2026; on every page since 15 Nov) */
@@ -143,6 +143,12 @@
   .skey{display:none}.searchbox input{padding-right:40px}
 }
 @media (max-width:480px){.brand span{display:none}}   /* the mark alone, so what is happening fits beside it on one row */
+@media (max-width:360px){   /* narrower still: the mark and the tools share the first row, what is happening has the second */
+  .side{display:contents}
+  .tools{margin-left:auto}
+  .happening{order:1;flex-basis:100%}
+  .nav{order:2}.lookup{order:3}
+}
 @media (pointer:coarse){.searchbox input{min-height:44px}.sopt{padding:12px 10px}}
 /* A page with its own body styles wraps the header in .hdrwrap: a full-width strip, not sticky. */
 .hdrwrap{background:var(--bg);border-bottom:1px solid var(--line)}

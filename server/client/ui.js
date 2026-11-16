@@ -112,10 +112,14 @@
         </div>
       </form>
       <div class="side">
-        <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>${icon('alert')}Needs you <span class="count" id="attncount"></span></a>
-        ${queue}
-        <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">${icon('moon')}</button>
-      </div>`;
+        <span class="happening">
+          <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>${icon('alert')}Needs you <span class="count" id="attncount"></span></a>
+          ${queue}
+        </span>
+        <span class="tools" id="tools-top">
+          <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">${icon('moon')}</button>
+        </span>
+      </div>`;   // .happening: what is going on. .tools: the looks and settings; another control for the right side goes in here.
     // "/" or Ctrl+K reaches the search box from anywhere on any page.
     const box = document.getElementById('url');
     document.addEventListener('keydown', (ev) => {
@@ -123,6 +127,11 @@
       if ((ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); box.focus(); box.select(); }
     });
     addEventListener('scroll', () => root.classList.toggle('scrolled', scrollY > 8), { passive: true });
+    // How much of the top edge the header holds while it sticks (nothing on a phone, where it scrolls away): --toph.
+    // Anything else that sticks, or scrolls a target into view, starts below it.
+    const measure = () => root.style.setProperty('--toph', (getComputedStyle(top).position === 'sticky' ? top.offsetHeight : 0) + 'px');
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(top);
+    addEventListener('resize', measure); measure();
     // Light or dark: flips what is showing now, and remembers it. A page with its own body styles ([data-theme]
     // only, no system query) always carries the attribute, set in its <head>.
     document.getElementById('theme').addEventListener('click', () => {

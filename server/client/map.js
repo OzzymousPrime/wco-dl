@@ -845,7 +845,7 @@
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
     const needs = (x) => x.missing > 0 || x.undub > 0;
     const counted = followed.map((x) => x.countedAt).filter(Boolean).sort()[0];
-    $('fcounted').textContent = counted ? `counted ${when(counted)}` : 'not counted yet, so dub swaps are not shown';
+    $('fcounted').textContent = ' · ' + (counted ? `counted ${when(counted)}` : 'not counted yet, so dub swaps are not shown');
     // The list opens on what needs work: Incomplete, or All when nothing is incomplete. After that the choice is yours.
     const here = followed.filter((x) => !gone.has(x.slug)), lacking = here.filter(needs).length;
     if (!fkindSet) { fkindSet = true; setSeg('fkind', lacking ? 'incomplete' : 'all'); }

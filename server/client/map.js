@@ -46,6 +46,7 @@
   // history entry, so the browser's Back returns to Home where you were on it and Forward opens the show again. Each
   // entry keeps its own scroll position (the browser's own restoring cannot be used: the view is swapped after it runs).
   let link = '', view = 'home';
+  const settled = new Set();                           // episodes whose square has played its settle, for the show on screen
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   try { history.scrollRestoration = 'manual'; } catch { /* an old browser: it keeps its own restoring */ }
   const keepScroll = () => { try { history.replaceState({ ...(history.state || {}), y: Math.round(scrollY) }, ''); } catch { /* not kept */ } };
@@ -73,7 +74,7 @@
     view = 'home'; show = null; link = ''; sel.clear(); fills = new Map();
     $('show').hidden = true; $('picker').hidden = true; $('found').hidden = true; $('run').hidden = true; $('bar').classList.remove('on');
     $('empty').hidden = false; status(''); setTrail(''); hideTip(); document.documentElement.style.setProperty('--sbarh', '0px');
-    document.title = BASE_TITLE;
+    idleTitle = document.title = BASE_TITLE;
     renderHome();
   }
   function toHash(hash) {
@@ -110,7 +111,7 @@
       show = got; link = to;
       if (show.series) remember(show.slug, show.series.title);
       $('url').value = ''; $('sclear').hidden = true; $('skey').hidden = false;
-      $('map').classList.add('fresh'); setTimeout(() => $('map').classList.remove('fresh'), 900);
+      if (!same) { settled.clear(); $('map').classList.add('fresh'); setTimeout(() => $('map').classList.remove('fresh'), 900); }   // squares arrive once per show, not after each run
       if (show.language) setSeg('lang', show.language);
       $('empty').hidden = true; $('found').hidden = true;
       if (!show.series) {
@@ -268,7 +269,7 @@
     if (o.push !== false && location.search !== url) { keepScroll(); history.pushState({ v: 'found' }, '', url); }
     view = 'found'; link = '';
     $('show').hidden = true; $('picker').hidden = true; $('empty').hidden = true; reveal($('found'));
-    $('run').hidden = true; show = null; sel.clear(); $('bar').classList.remove('on'); document.title = `Search: ${q} · wco-dl`;
+    $('run').hidden = true; show = null; sel.clear(); $('bar').classList.remove('on'); idleTitle = document.title = `Search: ${q} · wco-dl`;
     scrollTo(0, o.y || 0);
     $('foundhead').textContent = `On wcostream: "${q}"`;
     setTrail(`Search: ${q}`);
@@ -481,7 +482,13 @@
     if (!e.el) return;
     const f = fills.get(e.id), live = f && f.state !== 'cancelled';
     const was = e.fs; e.fs = live ? f.state : '';
-    e.el.className = 'cell ' + e.st + (e.nowco ? ' nowco' : '') + (live ? ' f-' + f.state : '') + (e.fs === 'done' && was && was !== 'done' ? ' pop' : '');
+    // The moment an episode lands its square settles, once: the class stays through later redraws (so the animation is
+    // not started again) and is taken off when it ends; a square drawn already done never plays it.
+    if (e.fs === 'done' && was && was !== 'done' && !settled.has(e.id)) {
+      settled.add(e.id); e.settle = true;
+      e.el.addEventListener('animationend', () => { e.settle = false; e.el.classList.remove('settle'); }, { once: true });
+    }
+    e.el.className = 'cell ' + e.st + (e.nowco ? ' nowco' : '') + (live ? ' f-' + f.state : '') + (e.settle ? ' settle' : '');
     const au = live ? (f.state === 'downloading' ? `${f.progress ?? 0}%` : FILL_LABEL[f.state]) : offWco(e) ? 'n/a' : e.st === 'dub' ? 'EN' : e.st === 'undub' ? 'JP' : e.st === 'unknown' ? '?' : '';
     e.el.innerHTML = `<span class="n">${show.absolute && e.abs ? e.abs : e.e}</span>${au ? `<span class="au${au.length > 5 ? ' long' : ''}">${au}</span>` : ''}`;
     e.el.style.setProperty('--p', (live && f.state === 'downloading' ? f.progress ?? 0 : live && f.state === 'importing' ? 100 : 0) + '%');
@@ -618,6 +625,18 @@
   const STATE_TEXT = { queued: 'waiting', downloading: 'downloading', importing: 'importing', done: 'done', premium: 'premium, sent to Sonarr',
     kept: 'to check', failed: 'failed', cancelled: 'cancelled' };
   const BASE_TITLE = document.title;
+  let idleTitle = BASE_TITLE;
+  // The tab while a run is going: "3 of 5 · 55% · Show" and a dot on its icon, so it can be watched from another tab.
+  // On a show's page the title is that show's own run (set where its strip is drawn); elsewhere it is whatever is
+  // downloading. Both go back to the plain title and icon when nothing is.
+  function tabState() {
+    const working = allRuns.flatMap((j) => j.episodes.map((e) => ({ e, j }))).find((x) => isWorking(x.e));
+    UI.busyTab(!!working);
+    if (show?.series) return;
+    if (!working) { document.title = idleTitle; return; }
+    const list = working.j.episodes.filter((e) => e.state !== 'cancelled');
+    document.title = `${list.indexOf(working.e) + 1} of ${list.length} · ${working.e.state === 'importing' ? 'importing' : (working.e.progress ?? 0) + '%'} · ${working.j.title}`;
+  }
   const isLive = (j) => j.episodes.some((e) => ACTIVE.includes(e.state));
   const isWorking = (e) => e.state === 'downloading' || e.state === 'importing';
   const when = (s) => new Date(s).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -656,6 +675,8 @@
       const f = [...fills.values()], n = (s) => f.filter((e) => e.state === s).length;
       toast(['Finished:', n('done') && `${n('done')} done`, n('premium') && `${n('premium')} sent to Sonarr`, n('kept') && `${n('kept')} to check`, n('failed') && `${n('failed')} failed`].filter(Boolean).join(' '));
       wcoStale = true;                                // the wcostream note counts what needs work: ask again
+      await new Promise((r) => setTimeout(r, 320));   // the last square finishes settling before the map is drawn afresh
+      if (my !== pollSeq) return;
       await openShow(link, { push: false }); return;  // fresh library state; opening it polls again
     }
     pollT = setTimeout(poll, showActive() ? 1500 : allRuns.some(isLive) ? 3000 : 15000);
@@ -671,7 +692,8 @@
     }
     if (show?.series && !$('show').hidden) render();
     const f = [...fills.values()].filter((e) => e.state !== 'cancelled');
-    if (!show?.series || !f.length) { $('run').hidden = true; document.title = show?.series ? `${show.series.title} · wco-dl` : BASE_TITLE; return; }
+    tabState();
+    if (!show?.series || !f.length) { $('run').hidden = true; if (show?.series) document.title = `${show.series.title} · wco-dl`; return; }
     const n = (s) => f.filter((e) => e.state === s).length;
     const active = f.some((e) => ACTIVE.includes(e.state)), cur = f.find(isWorking);
     const settled = f.length - n('queued') - n('downloading') - n('importing');
@@ -710,7 +732,8 @@
     $('cancel')?.addEventListener('click', () => runAction('cancel', runs.filter(isLive)));
     $('retry')?.addEventListener('click', () => runAction('retry', runs));
     $('runqueue')?.addEventListener('click', () => openQueue(true));
-    document.title = (cur ? `${cur.state === 'importing' ? 'Importing' : (cur.progress ?? 0) + '%'} ${cur.s}x${pad(cur.e)} · ` : active ? `${n('queued')} waiting · ` : '') + `${show.series.title} · wco-dl`;
+    document.title = cur ? `${order.indexOf(cur) + 1} of ${f.length} · ${cur.state === 'importing' ? 'importing' : (cur.progress ?? 0) + '%'} · ${show.series.title}`
+      : (active ? `${n('queued')} waiting · ` : '') + `${show.series.title} · wco-dl`;
   }
   async function runAction(kind, runs) {
     try { for (const j of runs) await api('POST', `/fill/jobs/${j.id}/${kind}`, {}); }

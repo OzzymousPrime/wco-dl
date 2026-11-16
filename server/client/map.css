@@ -242,10 +242,10 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 /* Search box with suggestions, and motion (11 Nov 2026, fifth pass). Motion is short and functional: a panel that
    appears rises 6px, squares arrive once per show, a finished square pops once, bars slide. No glow, no shimmer. */
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-@keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes settle{from{transform:scale(.88);border-color:var(--accent)}}   /* a finished square settles into place, once */
 .enter{animation:rise var(--mid) var(--ease) both}
 .fresh .cell{animation:rise 200ms var(--ease) both;animation-delay:calc(var(--i,0) * 7ms)}
-.cell.pop{animation:pop 260ms var(--ease)}
+.cell.settle{animation:settle 260ms var(--ease)}
 .flist li,.lib li,.qeps li{transition:background-color var(--fast) var(--ease)}
 .slabel span,.gapmark,.live{transition:color var(--fast) var(--ease)}
 .queue,#attention{scroll-margin-top:72px}

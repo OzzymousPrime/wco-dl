@@ -145,10 +145,30 @@
     if (q && queue !== undefined) q.textContent = queue ? String(queue) : '';
     if (a && attention !== undefined) { a.textContent = attention ? String(attention) : ''; ab.hidden = !attention; }
   };
+  // ---------- A run you can watch from another tab (15 Nov 2026) ----------
+  // UI.busyTab(true) swaps the tab's icon for the same one with a small dot while something is downloading or
+  // importing; false puts it back. The dotted icon is made once from favicon.svg, so the two cannot drift apart.
+  let dotted = null, tabBusy = false;
+  UI.busyTab = async (on) => {
+    on = !!on;
+    if (on === tabBusy) return;
+    tabBusy = on;
+    const link = document.querySelector('link[rel~="icon"]'); if (!link) return;
+    if (!on) { link.href = 'favicon.svg'; return; }
+    if (!dotted) {
+      try {
+        const svg = await (await fetch('favicon.svg')).text();
+        dotted = 'data:image/svg+xml,' + encodeURIComponent(svg.replace('</svg>', '<style>.dot{fill:#4f46e5;stroke:#fafafa;stroke-width:2.5}@media (prefers-color-scheme:dark){.dot{stroke:#161617}}</style><circle class="dot" cx="24.5" cy="7.5" r="6.2"/></svg>'));
+      } catch { tabBusy = false; return; }
+    }
+    if (tabBusy) link.href = dotted;
+  };
+
   // Pages without a queue of their own ask for the two counts here: the queue every minute (every 15 seconds while
   // something is active), "Needs you" once a minute because the server asks Sonarr for it.
+  // While an episode is downloading or importing the tab says so ("Downloading · Library gaps · wco-dl") and carries the dot.
   if (top && page !== 'home') {
-    const ACTIVE = ['queued', 'downloading', 'importing'];
+    const ACTIVE = ['queued', 'downloading', 'importing'], TITLE = document.title;
     let attnAt = 0;
     const tick = async () => {
       let active = 0;
@@ -156,6 +176,9 @@
         const runs = await (await fetch('/fill/jobs')).json();
         active = runs.reduce((n, j) => n + j.episodes.filter((e) => ACTIVE.includes(e.state)).length, 0);
         UI.setCounts({ queue: active });
+        const working = runs.some((j) => j.episodes.some((e) => e.state === 'downloading' || e.state === 'importing'));
+        document.title = (working ? 'Downloading · ' : '') + TITLE;
+        UI.busyTab(working);
         if (Date.now() - attnAt >= 60000) { attnAt = Date.now(); UI.setCounts({ attention: (await (await fetch('/attention')).json()).length }); }
       } catch { /* the counts are optional */ }
       setTimeout(tick, active ? 15000 : 60000);

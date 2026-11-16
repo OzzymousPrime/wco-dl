@@ -10,23 +10,29 @@ wco-dl is a Command-line program and web application to download cartoons/anime/
 
 ## Quick Start with Docker
 
-The easiest way to run WCO-DL is with Docker Compose:
+1. Download [`docker-compose.yml`](docker-compose.yml) into an empty folder. Next to it, make a file called `.env`
+   with one line that says where downloads go. Use a folder Sonarr can also see:
 
-```bash
-# Copy environment file
-cp .env.example .env
+   ```bash
+   DOWNLOADS_DIR=/path/to/downloads/wco-dl
+   ```
 
-# Edit .env with your settings (OUTPUT_BASE at minimum)
-nano .env
+2. Start it. This fetches the ready-made image (`ghcr.io/ozzymousprime/wco-dl:latest`), so nothing is built:
 
-# Start the services
-docker compose up -d
+   ```bash
+   docker compose up -d
+   ```
 
-# Access the web interface at http://localhost:3000
-# Swagger API docs are at http://localhost:3000/api
-```
+3. Open http://localhost:3000/map.html. The first visit shows the setup page: paste Sonarr's address and API key,
+   and it tests the connection, checks that Sonarr can see the download folder, and says what to fix if not.
 
-See [DOCKER.md](DOCKER.md) for detailed setup instructions.
+![The setup page: Sonarr, the download folder and the Cloudflare helper, each with a tick or what to fix](docs/screenshots/setup.png)
+
+The same page is **Settings** afterwards (the cog in the header). Nothing else needs editing by hand; every
+variable in [`.env.example`](.env.example) is optional. Without Sonarr the original downloader page at
+http://localhost:3000 still works. Swagger API docs are at http://localhost:3000/api.
+
+See [DOCKER.md](DOCKER.md) for more, including building from source.
 
 ## What it looks like
 
@@ -221,7 +227,7 @@ Webhook URLs that resolve to loopback (`127.0.0.0/8`, `::1`), link-local (`169.2
 
 ## Environment Variables
 
-The server is configured through environment variables, set in `.env` when using Docker Compose. The main ones are listed below; see [DOCKER.md](DOCKER.md#environment-variables) and [`.env.example`](.env.example) for the full list, including the Byparr proxy and browser settings.
+The server is configured through environment variables, set in `.env` when using Docker Compose. What is saved on the Settings page wins over them. The main ones are listed below; see [DOCKER.md](DOCKER.md#environment-variables) and [`.env.example`](.env.example) for the full list, including the Byparr proxy and browser settings.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
@@ -229,8 +235,10 @@ The server is configured through environment variables, set in `.env` when using
 | `SERVER_PORT` | Web UI and API port | `3000` |
 | `CORS_ORIGIN` | Origin allowed to call the API from a browser | `http://localhost:3000` |
 | `BYPARR_URL` | Byparr instance used for Cloudflare bypass (also read by the Python CLI) | `http://localhost:8191`; `http://byparr:8191` in Docker |
-| `SONARR_URL` / `SONARR_API_KEY` | Sonarr import after each download; leave the key empty to disable | Unset |
-| `SONARR_IMPORT_BASE` | Where Sonarr sees `OUTPUT_BASE`, when Sonarr runs outside this container | Unset (same path) |
+| `DOWNLOADS_DIR` | Docker Compose only: the folder on the host where downloads are saved | A Docker volume |
+| `SONARR_URL` / `SONARR_API_KEY` | Sonarr's address and key. Usually set on the Settings page instead, which tests them first | Unset |
+| `SONARR_IMPORT_BASE` | Where Sonarr sees `OUTPUT_BASE`, when Sonarr runs outside this container. Also on the Settings page | Unset (same path) |
+| `ADMIN_PASSWORD` | Locks the Settings page. Can also be set on the page | Unset (open) |
 | `TZ` | Time zone for the overnight window | `UTC` |
 | `NOTIFY_URL` / `NOTIFY_TOKEN` | POST a summary `{source, title, body, url}` after the night's runs; the token goes in `x-notify-token` | Unset |
 | `PUBLIC_URL` | This app's address as you open it, for the link in that summary | Unset |

@@ -21,30 +21,38 @@ This guide covers running WCO-DL with Docker Compose, which includes:
 
 ## Quick Start
 
-1. **Copy environment file:**
+1. **Say where downloads go.** Next to `docker-compose.yml`, make a file called `.env` (or copy `.env.example`)
+   and set a folder on this machine that Sonarr can also see:
    ```bash
-   cp .env.example .env
+   DOWNLOADS_DIR=/path/to/downloads/wco-dl
    ```
 
-2. **Edit `.env`** with your settings (at minimum, set `OUTPUT_BASE`):
+2. **Start the services.** This fetches the ready-made image `ghcr.io/ozzymousprime/wco-dl:latest`:
    ```bash
-   OUTPUT_BASE=/path/to/your/downloads
+   docker compose up -d
    ```
 
-3. **Start the services:**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Access the web interface:**
-   - Open http://localhost:3000 in your browser
+3. **Open http://localhost:3000/map.html.** The first visit shows the setup page. Paste Sonarr's address and API
+   key there: it tests the connection, checks that Sonarr can see the download folder (by writing a small file
+   and asking Sonarr to find it), and checks the Cloudflare helper. The same page is Settings afterwards.
+   - Without Sonarr, the original downloader page at http://localhost:3000 still works
    - Swagger API docs: http://localhost:3000/api
+
+To build from source instead of using the image, replace the `image:` line under `app:` in `docker-compose.yml`
+with `build: .` and run `docker compose up -d --build`.
 
 ## Environment Variables
 
 ### Required
 
-- `OUTPUT_BASE`: Where to save downloaded files (default: `/data/downloads`)
+None. Sonarr's address and key, and where Sonarr sees the download folder, are set on the Settings page, and what
+is saved there wins over `.env`. They are kept in `connections.json` in the config volume.
+
+### Folders
+
+- `DOWNLOADS_DIR`: The folder on this machine where downloads are saved (Docker Compose only; default: a Docker volume)
+- `OUTPUT_BASE`: The same folder as the container sees it (default: `/data/downloads`). Rarely needs changing
+- `ADMIN_PASSWORD`: Locks the Settings page (default: unset; can also be set on the page)
 
 ### Optional
 
@@ -206,8 +214,8 @@ shm_size: "1gb"
 
 ### Downloads not appearing in Sonarr
 
-1. Check that `OUTPUT_BASE` matches your Sonarr download folder
-2. Verify `SONARR_URL` and `SONARR_API_KEY` are correct
+1. Open Settings (the cog in the header) and press "Test again": it tests Sonarr and whether Sonarr can see the download folder
+2. If the folder line fails, `DOWNLOADS_DIR` must be a folder Sonarr can reach too; then say on that page where Sonarr sees it
 3. Check app logs: `docker-compose logs app`
 
 ### Can't access web interface

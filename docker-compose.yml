@@ -4,7 +4,8 @@
 services:
   # Main WCO-DL application (NestJS + Python)
   app:
-    build: .
+    # The ready-made image. To build from this folder instead, replace the next line with:  build: .
+    image: ghcr.io/ozzymousprime/wco-dl:latest
     ports:
       - "${SERVER_PORT:-3000}:3000"
     environment:
@@ -28,9 +29,12 @@ services:
       - NOTIFY_URL=${NOTIFY_URL:-}
       - NOTIFY_TOKEN=${NOTIFY_TOKEN:-}
       - PUBLIC_URL=${PUBLIC_URL:-}
+      # Optional: a password for the Settings page (it can also be set on that page)
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     volumes:
-      # Downloaded files
-      - downloads:${OUTPUT_BASE:-/data/downloads}
+      # Downloaded files. For Sonarr imports, set DOWNLOADS_DIR in .env to a folder on this machine that Sonarr
+      # can also see; without it they go to a Docker volume that only this container can reach.
+      - ${DOWNLOADS_DIR:-downloads}:${OUTPUT_BASE:-/data/downloads}
       # Config persistence
       - config:/app/config
     depends_on:

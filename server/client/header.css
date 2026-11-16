@@ -87,6 +87,8 @@
 :where(.ui) a.btn{color:inherit;text-decoration:none}
 :where(.ui) a.btn.btn-quiet{color:var(--text-2)}
 .btn svg,.ico{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+/* Unfollow and Dismiss take something away: red under the pointer, plain until then */
+:where(.ui) .btn.danger:hover{color:var(--err);border-color:var(--err);background:transparent}
 @media (pointer:coarse){:where(.ui) .btn{min-height:44px}}
 
 /* ---------- Header: brand and pages on the left, search in the middle, what is happening on the right ---------- */

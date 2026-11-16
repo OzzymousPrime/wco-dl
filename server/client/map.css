@@ -375,3 +375,14 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
   .cal .ep,.cal .acts{grid-column:3}
   .showhead{gap:12px}
 }
+
+/* Three ranks, and labels that say the result (15 Nov 2026) */
+/* The follow switch holds both of its labels in one place, so it is the same width pressed or not */
+.swap{display:inline-grid}
+.swap > *{grid-area:1/1}
+[aria-pressed=true] > .swap .off,[aria-pressed=false] > .swap .on{visibility:hidden}
+.linkbtn.danger:hover{color:var(--err)}
+.fhead{align-items:center}
+.fhead .btn{height:28px;padding:0 8px;font-size:12px;gap:6px}
+.flist .btn{height:32px;padding:0 8px;font-size:13px;gap:6px}
+@media (pointer:coarse){.fhead .btn,.flist .btn{height:auto}}

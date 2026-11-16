@@ -351,7 +351,7 @@
         const diff = d.different || 0, gone = n - diff;
         parts.push(`${n} episode${n === 1 ? '' : 's'} that need${n === 1 ? 's' : ''} work cannot be had from wcostream as ${version}: ` +
           [gone && `${gone} not listed${d.latest ? ` (it lists up to ${d.latest})` : ''}`, diff && `${diff} where its episode of that number is a different episode`].filter(Boolean).join(', ') +
-          '. Dotted below, left out of "select all" and the overnight run.');
+          '. Dotted below, left out of "Select the gaps" and the overnight run.');
       }
       if (d.byTitle) parts.push(`${d.byTitle} ${d.byTitle === 1 ? 'is' : 'are'} found by title, because the site numbers this show differently from Sonarr.`);
       // The other way of numbering would supply more: offer the switch. Straight through is only offered when the
@@ -450,10 +450,14 @@
     for (const e of eps) { if (!selectable(e)) sel.delete(e.i); cellLook(e); }
     const p = picked(), sw = p.filter(isSwap).length, mi = p.filter((e) => e.st === 'missing').length;
     $('bar').classList.toggle('on', p.length > 0);
-    $('sum').innerHTML = `<b>${p.length} selected</b> <span>· ${[sw && sw + ' swap to dub', mi && mi + ' to download'].filter(Boolean).join(' · ')}</span>` +
+    // The button says the result ("Download 5 episodes"); the line beside it says what happens to them afterwards.
+    $('sum').innerHTML = `<b>${p.length} selected</b> <span>· ${[sw && sw + ' swap to dub', sw && mi && mi + ' to download', 'imported into Sonarr when done'].filter(Boolean).join(' · ')}</span>` +
       (sw ? `<span class="warn">Swapped files go to Sonarr's recycle bin, kept 7 days</span>` : '');
     confirmSwap = false;
-    $('golabel').textContent = sw ? `Swap ${sw} to dub${mi ? ` · download ${mi}` : ''}` : `Download and import ${mi}`;
+    $('golabel').textContent = sw ? `Swap ${sw} to dub${mi ? ` · download ${mi}` : ''}` : `Download ${mi} episode${mi === 1 ? '' : 's'}`;
+    const gaps = eps.filter((e) => e.el && actionable(e) && selectable(e)).length;
+    $('all').hidden = !gaps;
+    $('alllabel').textContent = `Select the ${gaps} gap${gaps === 1 ? '' : 's'}`;
     $('go').classList.remove('confirm');
     document.querySelectorAll('.slabel').forEach((l) => {
       const s = +l.dataset.s, all = eps.filter((e) => e.s === s), work = all.filter(actionable), n = work.filter((e) => sel.has(e.i)).length;
@@ -706,7 +710,7 @@
       return `<article class="qrun" data-id="${j.id}"><header>${UI.poster(j.seriesId, j.title)}<b>${esc(j.title)}</b>${j.auto ? '<span class="tag">overnight</span>' : ''}
         <span class="meta">${when(j.createdAt)} · ${j.language || 'default'} · ${bits}</span>
         <span class="grow"></span>${live && !j.episodes.some(isWorking) ? `<button class="btn" data-act="next" type="button" title="${j.auto ? 'Start this overnight run now, ahead of everything waiting' : 'Move this run to the head of the queue'}">${UI.icon('next')}${j.auto ? 'Run now' : 'Run next'}</button>` : ''}
-        ${live ? `<button class="btn" data-act="cancel" type="button">${UI.icon('x')}Cancel</button>` : ''}
+        ${live ? `<button class="btn btn-quiet" data-act="cancel" type="button">${UI.icon('x')}Cancel</button>` : ''}
         ${!live && (n('failed') || n('kept') || n('cancelled')) ? `<button class="btn" data-act="retry" type="button">${UI.icon('retry')}Retry (resumes partial downloads)</button>` : ''}
         <a class="linkbtn" href="/map.html?url=${encodeURIComponent(j.slug)}">Open map</a></header>
         <ul class="qeps">${rows.map((e) => {
@@ -757,8 +761,7 @@
 
   // ---------- Follow, and the home screen that lists what is followed ----------
   function setFollow(on) {
-    $('follow').setAttribute('aria-pressed', String(on));
-    $('followlabel').textContent = on ? 'Following overnight' : 'Follow overnight';
+    $('follow').setAttribute('aria-pressed', String(on));   // the label follows in CSS: "Following overnight" when pressed
   }
   $('follow').onclick = async () => {
     if (!show?.series) return;
@@ -890,7 +893,7 @@
       return `<li data-job="${a.jobId}" data-ep="${a.id}">${UI.poster(a.seriesId, a.show)}<span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
         <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
         <span class="acts">${a.state === 'premium' ? '' : `<button class="btn" data-a="retry" type="button">${UI.icon('retry')}Retry</button>`}<button class="linkbtn" data-a="log" type="button">Log</button>
-        <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn" data-a="dismiss" type="button">Dismiss</button></span>
+        <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn danger" data-a="dismiss" type="button">Dismiss</button></span>
         ${open.has(key) ? `<pre data-key="${key}">Loading…</pre>` : ''}</li>`;
     }).join('');
     if (html === lastAttn) return;

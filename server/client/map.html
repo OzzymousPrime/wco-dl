@@ -53,7 +53,7 @@
         <div class="seg" role="group" aria-label="Numbering" id="numbering">
           <button type="button" data-v="false" aria-pressed="true">By season</button><button type="button" data-v="true" aria-pressed="false">Straight through</button>
         </div>
-        <button class="btn follow" id="follow" type="button" aria-pressed="false" data-icon="check"><span id="followlabel">Follow overnight</span></button>
+        <button class="btn follow" id="follow" type="button" aria-pressed="false" data-icon="check"><span class="swap" id="followlabel"><span class="on">Following overnight</span><span class="off">Follow overnight</span></span></button>
         <div class="seg" role="group" aria-label="Audio" id="lang">
           <button type="button" data-v="dub" aria-pressed="true">Dub</button><button type="button" data-v="sub" aria-pressed="false">Sub</button>
         </div>
@@ -73,7 +73,7 @@
         <span><i class="sw soon"></i>Not aired</span>
       </div>
       <span class="grow"></span>
-      <button class="btn" id="all" type="button" data-icon="select"><span id="alllabel">Select all that need work</span></button>
+      <button class="btn btn-quiet" id="all" type="button" data-icon="select" hidden><span id="alllabel">Select the gaps</span></button>
     </div>
     <details class="help" id="help"><summary><span class="wide">How to select, and what the squares say during a run</span><span class="narrow">Key, numbering and help</span></summary>
       <p>Click or drag to select · <kbd>Shift</kbd> click for a range · click a season name for the whole season · arrows and <kbd>Space</kbd> with the keyboard · <kbd>Esc</kbd> clears</p>
@@ -89,7 +89,7 @@
       <ul class="alist" id="attnlist"></ul>
     </section>
     <div class="fhead" id="fhead"><h2>Followed shows <span class="count" id="fcount"></span></h2>
-      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span> · <span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span> <button class="linkbtn" id="recount" type="button">Recount</button></span><span class="grow"></span>
+      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span> · <span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span> </span><button class="btn btn-quiet" id="recount" type="button" data-icon="refresh">Recount</button><span class="grow"></span>
       <div class="seg" role="group" aria-label="Which followed shows" id="fkind">
         <button type="button" data-v="all" aria-pressed="true">All</button><button type="button" data-v="incomplete" aria-pressed="false">Incomplete <span class="count" id="fincomplete"></span></button>
       </div>
@@ -112,7 +112,7 @@
   <span class="grow"></span>
   <label class="hint" for="q">Quality</label>
   <select id="q"><option value="1080">HD / FHD</option><option value="480">SD</option></select>
-  <button class="btn btn-primary" id="go" type="button" data-icon="download"><span id="golabel">Download and import</span></button>
+  <button class="btn btn-primary" id="go" type="button" data-icon="download"><span id="golabel">Download</span></button>
 </div></div>
 <div class="toast" id="toast" role="status"></div>
   </main>

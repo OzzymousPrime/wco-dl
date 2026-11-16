@@ -31,6 +31,7 @@
     chev: '<path d="m9 6 6 6-6 6"/>',
     cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
   };
+  ICON.settings = ICON.cog;
   const icon = UI.icon = (name, cls = '') => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ''}</svg>`;
   // ---------- Posters (15 Nov 2026): a show's small Sonarr poster at the left of its row ----------
   // UI.poster(seriesId, title, size) gives the markup: 's' 28x42 in lists, 'l' 64x96 on the show page, 'xs' 18x27 in the
@@ -215,7 +216,7 @@
         <p class="hint" id="s-tokenhint"></p>
       </fieldset>
       <p class="serr" id="s-err" role="alert" hidden></p>
-      <div class="sacts"><button class="btn" type="button" id="s-cancel">${icon('x')}Cancel</button><button class="btn btn-primary" type="submit" id="s-save">${icon('check')}Save</button></div>
+      <div class="sacts"><button class="btn btn-quiet" type="button" id="s-cancel">${icon('x')}Cancel</button><button class="btn btn-primary" type="submit" id="s-save">${icon('check')}Save</button></div>
     </form>`;
     document.body.append(dlg);
     const f = (id) => dlg.querySelector('#' + id);

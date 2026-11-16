@@ -101,14 +101,14 @@
       : `<a class="btn" id="queuebtn" href="/map.html#queue">${icon('list')}Queue <span id="queuecount" class="count"></span></a>`;
     top.innerHTML = `<a class="brand" href="/map.html" aria-label="wco-dl, Home"><img src="favicon.svg" width="20" height="20" alt=""><span>wco-dl</span></a>
       <nav class="nav" aria-label="Pages">${PAGES.map(([id, href, label]) => `<a href="${href}"${id === page ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
-      <form class="lookup" id="lookup" role="search" aria-label="Search" action="/map.html" method="get">
+      <form class="lookup" id="lookup" role="search" aria-label="Search or jump" action="/map.html" method="get">
         <div class="searchbox">
           ${icon('search', 'sico')}
-          <input id="url" name="find" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search shows by name, or paste a wcostream show link"
-            placeholder="Search shows, or paste a wcostream link" autocomplete="off" spellcheck="false">
+          <input id="url" name="find" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search or jump: a show, an action, or a wcostream link"
+            placeholder="Search or jump" autocomplete="off" spellcheck="false">
           <kbd class="skey" id="skey" aria-hidden="true">/</kbd>
           <button class="sclear" id="sclear" type="button" aria-label="Clear the search" hidden>${icon('x')}</button>
-          <div class="suggest" id="suggest" role="listbox" aria-label="Suggestions" hidden></div>
+          <div class="suggest" id="suggest" role="listbox" aria-label="Results" hidden></div>
         </div>
       </form>
       <div class="side">
@@ -116,15 +116,15 @@
           <a class="btn btn-quiet" id="attnbtn" href="/map.html#attention" hidden>${icon('alert')}Needs you <span class="count" id="attncount"></span></a>
           ${queue}
         </span>
-        <span class="tools" id="tools-top">
+        <span class="looktools">
           <button class="btn btn-quiet" id="theme" type="button" aria-label="Switch light or dark">${icon('moon')}</button>
         </span>
-      </div>`;   // .happening: what is going on. .tools: the looks and settings; another control for the right side goes in here.
+      </div>`;   // .happening: what is going on. .looktools: the looks and settings; another control for the right side goes in here.
     // "/" or Ctrl+K reaches the search box from anywhere on any page.
     const box = document.getElementById('url');
     document.addEventListener('keydown', (ev) => {
       const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
-      if ((ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); box.focus(); box.select(); }
+      if ((ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) || (ev.key?.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); box.focus(); box.select(); }
     });
     addEventListener('scroll', () => root.classList.toggle('scrolled', scrollY > 8), { passive: true });
     // How much of the top edge the header holds while it sticks (nothing on a phone, where it scrolls away): --toph.
@@ -184,6 +184,149 @@
       setTimeout(tick, active ? 15000 : 60000);
     };
     tick();
+  }
+
+  // ---------- Jump to anything (15 Nov 2026): the header's search box, on every page ----------
+  // Focus it (or press "/") and a panel opens: your followed shows first, filtered by what is typed, answered from the
+  // list kept in memory so it never waits on Sonarr; then actions; then wcostream's catalogue, added when it arrives.
+  // Arrows move, Enter opens, Esc closes; a pasted link opens straight away. Typing selects the first result, so a
+  // few letters and Enter is enough. A page hooks in what it can do in place (UI.hooks); elsewhere a choice navigates.
+  if (top) {
+    const box = document.getElementById('url'), panel = document.getElementById('suggest'), clear = document.getElementById('sclear'), key = document.getElementById('skey');
+    const isLink = UI.isLink = (v) => /^https?:\/\//i.test(String(v).trim());
+    const go = (href) => { location.href = href; };
+    const openShow = (slug, lang) => (UI.hooks.openShow ? UI.hooks.openShow(slug, lang) : go('/map.html?url=' + encodeURIComponent(slug)));
+    const search = (q) => (UI.hooks.search ? UI.hooks.search(q) : go('/map.html?find=' + encodeURIComponent(q)));
+    const getJSON = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(`The server answered ${r.status}`); return r.json(); };
+    const postJSON = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); if (!r.ok) throw new Error(`The server answered ${r.status}`); return r.json().catch(() => ({})); };
+
+    // Followed shows: asked for once, the first time the panel opens, and kept. The home page hands over its own copy.
+    let mine = null, asking = null, paused = null;
+    UI.setFollowed = (list) => { mine = list; };
+    UI.setPaused = (p) => { paused = !!p; };
+    const loadMine = () => (mine ? Promise.resolve(mine) : (asking = asking || getJSON('/followed').then((l) => { mine = mine || l; }, () => { mine = mine || []; })));
+    const recents = () => { try { return JSON.parse(localStorage.getItem('wco-recent') || '[]'); } catch { return []; } };
+    UI.remember = (slug, title) => { store.set('wco-recent', JSON.stringify([{ slug, title }, ...recents().filter((r) => r.slug !== slug)].slice(0, 6))); };
+
+    const ACTIONS = [
+      { id: 'pause', icon: () => (paused ? 'play' : 'pause'), title: () => (paused === null ? 'Pause or resume the queue' : paused ? 'Resume the queue' : 'Pause the queue'), words: 'pause resume the queue' },
+      { id: 'retry', icon: () => 'retry', title: () => 'Retry everything that failed', words: 'retry everything that failed' },
+      { id: 'library', icon: () => 'chev', title: () => 'Open Library gaps', words: 'open library gaps' },
+      { id: 'calendar', icon: () => 'chev', title: () => 'Open Dub calendar', words: 'open dub calendar' },
+      { id: 'queue', icon: () => 'list', title: () => 'Open the queue', words: 'open the queue' },
+    ];
+    const act = {
+      pause: async () => {
+        try { const now = await getJSON('/fill/state'), r = await postJSON('/fill/pause', { paused: !now.paused }); paused = !!r.paused; UI.toast(paused ? 'Paused: the episode in hand finishes, nothing new starts' : 'Resumed'); }
+        catch (e) { UI.toast(`Could not change the queue: ${e.message}`); }
+        if (UI.hooks.refresh) UI.hooks.refresh();
+      },
+      retry: async () => {
+        try {
+          const rows = (await getJSON('/attention')).filter((a) => a.state === 'failed' || a.state === 'kept');
+          if (!rows.length) { UI.toast('Nothing has failed: there is nothing to retry'); return; }
+          let n = 0;
+          for (const a of rows) { try { await postJSON(`/fill/jobs/${a.jobId}/retry/${a.id}`); n++; } catch { /* that one stays in Needs you */ } }
+          UI.toast(`Queued ${n} episode${n === 1 ? '' : 's'} again${n < rows.length ? `; ${rows.length - n} could not be queued` : ''}`);
+        } catch (e) { UI.toast(`Could not retry: ${e.message}`); }
+        if (UI.hooks.refresh) UI.hooks.refresh();
+      },
+      library: () => go('/library.html'),
+      calendar: () => go('/calendar.html'),
+      queue: () => (UI.hooks.queue ? UI.hooks.queue() : go('/map.html#queue')),
+    };
+
+    const sug = { items: [], active: -1, seq: 0, timer: null, loading: false, q: '' };
+    const close = () => { panel.hidden = true; box.setAttribute('aria-expanded', 'false'); box.removeAttribute('aria-activedescendant'); sug.active = -1; };
+    UI.closeJump = close;
+    const mark = () => {     // move the selection without redrawing, so pictures are not fetched again
+      panel.querySelectorAll('.sopt').forEach((o) => o.setAttribute('aria-selected', String(+o.dataset.n === sug.active)));
+      if (sug.active >= 0) box.setAttribute('aria-activedescendant', 'sopt' + sug.active); else box.removeAttribute('aria-activedescendant');
+    };
+    const draw = () => {
+      let n = -1;
+      const html = [['shows', 'Shows'], ['actions', 'Actions'], ['wco', 'On wcostream']].map(([g, label]) => {
+        const list = sug.items.filter((x) => x.group === g);
+        return list.length ? `<div role="group" aria-label="${label}"><div class="sgroup" aria-hidden="true">${label}</div>` + list.map((x) => {
+          n++;
+          return `<div class="sopt" role="option" id="sopt${n}" data-n="${n}" aria-selected="${n === sug.active}">${x.pic || ''}<span class="sname">${esc(x.title)}</span>${x.meta ? `<span class="smeta">${esc(x.meta)}</span>` : ''}</div>`;
+        }).join('') + '</div>' : '';
+      }).join('') + (sug.loading ? '<div class="snote">Searching wcostream…</div>' : '');
+      panel.innerHTML = html;
+      panel.hidden = !html; box.setAttribute('aria-expanded', String(!!html));
+      mark();
+    };
+    const build = () => {
+      const q = sug.q, words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const has = (t) => words.every((w) => t.toLowerCase().includes(w));
+      const starts = (t) => words.every((w) => t.toLowerCase().split(/[^a-z0-9]+/).some((p) => p.startsWith(w)));
+      const name = (x) => x.title || x.slug;
+      const recent = recents().map((r) => r.slug), rank = (x) => { const i = recent.indexOf(x.slug); return i < 0 ? 99 : i; };
+      const shows = (mine || []).filter((x) => has(name(x)))
+        .sort((a, b) => (q ? Number(starts(name(b))) - Number(starts(name(a))) : rank(a) - rank(b)) || name(a).localeCompare(name(b), 'en', { sensitivity: 'base' })).slice(0, 6)
+        .map((x) => ({ group: 'shows', title: name(x), pic: UI.poster(x.seriesId, name(x), 'xs'),
+          meta: [x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ') || (x.countedAt ? 'complete' : ''), run: () => openShow(x.slug) }));
+      const actions = ACTIONS.filter((a) => !q || has(a.words)).map((a) => ({ group: 'actions', title: a.title(), pic: icon(a.icon()), run: act[a.id] }));
+      if (q) actions.push({ group: 'actions', title: `Search wcostream for "${q}"`, pic: icon('search'), run: () => search(q) });
+      return { shows, actions, have: new Set((mine || []).filter((x) => has(name(x))).map((x) => x.slug)), starts };
+    };
+    function suggest() {
+      const q = sug.q = box.value.trim();
+      clear.hidden = !q; key.hidden = !!q;
+      clearTimeout(sug.timer); const my = ++sug.seq;
+      if (isLink(q)) { close(); return; }
+      const first = build();
+      sug.items = [...first.shows, ...first.actions]; sug.loading = q.length >= 2; sug.active = q && sug.items.length ? 0 : -1;
+      draw();
+      if (!mine) loadMine().then(() => { if (my === sug.seq && document.activeElement === box) suggest(); });
+      if (paused === null) getJSON('/fill/state').then((s) => { paused = !!s.paused; if (my === sug.seq && !panel.hidden) { const b = build(); sug.items = [...b.shows, ...b.actions, ...sug.items.filter((x) => x.group === 'wco')]; draw(); } }, () => undefined);   // the pause action now names what it will do
+      if (q.length < 2) return;
+      sug.timer = setTimeout(async () => {
+        const found = await getJSON('/library/search?q=' + encodeURIComponent(q)).catch(() => []);
+        if (my !== sug.seq) return;                       // the box has moved on
+        const now = build(), keep = sug.active;
+        sug.items = [...now.shows, ...now.actions, ...found.filter((c) => !now.have.has(c.slug)).sort((a, b) => Number(now.starts(b.name)) - Number(now.starts(a.name))).slice(0, 8).map((c) => ({ group: 'wco', title: c.name,
+          pic: c.series ? UI.poster(c.series.id, c.series.title || c.name, 'xs') : '<span class="poster xs none"></span>',
+          meta: [c.language === 'sub' ? 'sub only' : 'dub', c.series ? (c.follow ? 'following' : 'in Sonarr') : 'not in Sonarr yet'].join(' · '),
+          run: () => (c.series ? openShow(c.slug, c.language) : search(c.name)) }))];   // not in Sonarr: the results page has "Add to Sonarr"
+        sug.loading = false; sug.active = Math.min(keep, sug.items.length - 1);
+        draw();
+      }, 220);
+    }
+    const choose = (x) => { if (!x) return; close(); box.value = ''; clear.hidden = true; key.hidden = false; box.blur(); x.run(); };
+    box.addEventListener('input', suggest);
+    box.addEventListener('focus', suggest);
+    box.addEventListener('blur', () => setTimeout(close, 120));
+    box.addEventListener('paste', () => setTimeout(() => { if (isLink(box.value)) { const v = box.value.trim(); close(); box.value = ''; clear.hidden = true; key.hidden = false; (UI.hooks.link || ((u) => go('/map.html?url=' + encodeURIComponent(u))))(v); } }, 0));
+    box.addEventListener('keydown', (ev) => {
+      const open = !panel.hidden, n = sug.items.length;
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        if (!open) { suggest(); return; }
+        if (!n) return;
+        ev.preventDefault();
+        sug.active = ev.key === 'ArrowDown' ? (sug.active + 1) % n : (sug.active - 1 + n) % n;
+        mark();
+        document.getElementById('sopt' + sug.active)?.scrollIntoView({ block: 'nearest' });
+      } else if (ev.key === 'Enter' && open && sug.active >= 0) {
+        ev.preventDefault(); choose(sug.items[sug.active]);
+      } else if (ev.key === 'Escape' && open) {
+        ev.preventDefault(); ev.stopPropagation(); close();
+      }
+    });
+    panel.addEventListener('mousedown', (ev) => ev.preventDefault());   // keep the focus in the box
+    panel.addEventListener('click', (ev) => { const o = ev.target.closest('.sopt'); if (o) choose(sug.items[+o.dataset.n]); });
+    panel.addEventListener('pointermove', (ev) => {
+      const o = ev.target.closest('.sopt'); if (!o || +o.dataset.n === sug.active) return;
+      sug.active = +o.dataset.n; mark();
+    });
+    clear.onclick = () => { box.value = ''; box.focus(); suggest(); };
+    // Enter with nothing selected: a link opens, words are searched for on wcostream.
+    document.getElementById('lookup').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const q = box.value.trim(); if (!q) return;
+      close();
+      if (isLink(q)) (UI.hooks.link || ((u) => go('/map.html?url=' + encodeURIComponent(u))))(q); else search(q);
+    });
   }
 
   // ---------- Accent: six measured colours; each is at least 4.5:1 as text on every surface, light and dark ----------
@@ -310,7 +453,7 @@
   UI.unhold = (key) => { if (!held || held.key !== key) return false; held = null; hideToast(); return true; };
   document.addEventListener('click', (ev) => { if (ev.target.closest?.('.tundo')) UI.undo(); });
   document.addEventListener('keydown', (ev) => {
-    if (!held || ev.key.toLowerCase() !== 'z' || !(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey) return;
+    if (!held || ev.key?.toLowerCase() !== 'z' || !(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey) return;
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;   // the field's own undo
     ev.preventDefault(); UI.undo();
   });

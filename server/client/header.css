@@ -100,7 +100,7 @@
 .nav a:hover{background:var(--surface-2)}
 .nav a[aria-current]{color:var(--text);background:var(--surface-2)}
 .lookup{flex:1 1 220px;display:flex;min-width:0}
-.side,.happening,.tools{display:flex;gap:4px;align-items:center}
+.side,.happening,.looktools{display:flex;gap:4px;align-items:center}
 .side .btn-quiet{padding:0 10px}
 
 /* Search box with its panel of results (11 Nov 2026; on every page since 15 Nov) */
@@ -145,7 +145,7 @@
 @media (max-width:480px){.brand span{display:none}}   /* the mark alone, so what is happening fits beside it on one row */
 @media (max-width:360px){   /* narrower still: the mark and the tools share the first row, what is happening has the second */
   .side{display:contents}
-  .tools{margin-left:auto}
+  .looktools{margin-left:auto}
   .happening{order:1;flex-basis:100%}
   .nav{order:2}.lookup{order:3}
 }

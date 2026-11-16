@@ -68,6 +68,7 @@
     mark();
     let t;
     try { t = document.startViewTransition(() => { change(); mark(); }); } catch { change(); done(); return; }
+    t.ready.catch(() => undefined);                    // skipped (another transition is under way): the swap still happens
     t.finished.then(done, done);
   }
   function showHome() {
@@ -109,7 +110,7 @@
     else if (!o.pop && location.search !== url) history.replaceState({ ...(history.state || {}), v: 'show' }, '', url);
     const change = () => {
       show = got; link = to;
-      if (show.series) remember(show.slug, show.series.title);
+      if (show.series) UI.remember(show.slug, show.series.title);
       $('url').value = ''; $('sclear').hidden = true; $('skey').hidden = false;
       if (!same) { settled.clear(); $('map').classList.add('fresh'); setTimeout(() => $('map').classList.remove('fresh'), 900); }   // squares arrive once per show, not after each run
       if (show.language) setSeg('lang', show.language);
@@ -129,7 +130,7 @@
       }
       if (!same) scrollTo(0, o.y || 0);
     };
-    if (same) change();
+    if (same || cold) change();                        // a first load has nothing to glide from
     else glide(change, view === 'home' ? o.key || got.slug : null, () => { if (!cold && got.series) $('title').focus({ preventScroll: true }); });
   }
   function showPicker(cands, hint) {
@@ -155,95 +156,12 @@
   let st;
   $('search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(async () => renderPicks(await api('GET', '/series-search?q=' + encodeURIComponent($('search').value)).catch(() => [])), 250); });
   $('change').onclick = () => showPicker(show?.candidates, 'Pick the series these episodes belong to. It is remembered for this link.');
-  $('lookup').addEventListener('submit', (ev) => { ev.preventDefault(); closeSuggest(); isLink($('url').value) ? openShow($('url').value) : nameSearch(); });
-
-  // ---------- Search box: suggestions as you type, recent shows, keyboard control ----------
-  // Your own shows answer at once from the followed list; wcostream's catalogue follows a moment later.
-  // Arrows move, Enter opens, Esc closes; "/" or Ctrl+K focuses the box from anywhere; a pasted link opens straight away.
-  const sug = { items: [], active: -1, seq: 0, timer: null, loading: false };
-  const isLink = (v) => /^https?:\/\//i.test(v.trim());
-  function recents() { try { return JSON.parse(localStorage.getItem('wco-recent') || '[]'); } catch { return []; } }
-  function remember(slug, title) {
-    try { localStorage.setItem('wco-recent', JSON.stringify([{ slug, title }, ...recents().filter((r) => r.slug !== slug)].slice(0, 6))); } catch { /* private window: no recents */ }
-  }
-  function closeSuggest() {
-    $('suggest').hidden = true; $('url').setAttribute('aria-expanded', 'false'); $('url').removeAttribute('aria-activedescendant'); sug.active = -1;
-  }
-  function drawSuggest(q) {
-    const groups = [['recent', 'Recent'], ['mine', 'Your shows'], ['wco', 'On wcostream']];
-    let n = -1;
-    const html = groups.map(([g, label]) => {
-      const list = sug.items.filter((x) => x.group === g);
-      return list.length ? `<div class="sgroup" role="presentation">${label}</div>` + list.map((x) => {
-        n++;
-        return `<div class="sopt" role="option" id="sopt${n}" data-n="${n}" aria-selected="${n === sug.active}"><span class="sname">${esc(x.title)}</span><span class="smeta">${esc(x.meta)}</span></div>`;
-      }).join('') : '';
-    }).join('') + (sug.loading ? '<div class="snote">Searching wcostream…</div>' : !sug.items.length && q ? '<div class="snote">Nothing by that name. Press Enter to search again, or try fewer words.</div>' : '');
-    $('suggest').innerHTML = html;
-    const open = !!html;
-    $('suggest').hidden = !open; $('url').setAttribute('aria-expanded', String(open));
-    if (sug.active >= 0) $('url').setAttribute('aria-activedescendant', 'sopt' + sug.active); else $('url').removeAttribute('aria-activedescendant');
-  }
-  function suggest() {
-    const q = $('url').value.trim();
-    $('sclear').hidden = !q; $('skey').hidden = !!q;
-    clearTimeout(sug.timer); const my = ++sug.seq; sug.active = -1;
-    if (isLink(q)) { closeSuggest(); return; }
-    if (!q) {
-      sug.loading = false;
-      sug.items = recents().map((r) => ({ group: 'recent', slug: r.slug, title: r.title, meta: 'opened lately', has: true }));
-      drawSuggest(''); return;
-    }
-    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const starts = (t) => words.every((w) => t.toLowerCase().split(/[^a-z0-9]+/).some((p) => p.startsWith(w)));
-    const mine = followed.filter((x) => words.every((w) => (x.title || x.slug).toLowerCase().includes(w)))
-      .sort((a, b) => Number(starts(b.title || b.slug)) - Number(starts(a.title || a.slug))).slice(0, 5)
-      .map((x) => ({ group: 'mine', slug: x.slug, title: x.title || x.slug, has: true,
-        meta: ['following', x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ') }));
-    sug.items = mine; sug.loading = q.length >= 2; drawSuggest(q);
-    if (q.length < 2) return;
-    sug.timer = setTimeout(async () => {
-      const found = await api('GET', '/library/search?q=' + encodeURIComponent(q)).catch(() => []);
-      if (my !== sug.seq) return;                       // the box has moved on
-      const have = new Set(mine.map((x) => x.slug));
-      sug.items = [...mine, ...found.filter((c) => !have.has(c.slug)).sort((a, b) => Number(starts(b.name)) - Number(starts(a.name))).slice(0, 8).map((c) => ({ group: 'wco', slug: c.slug, title: c.name, lang: c.language, has: !!c.series,
-        meta: [c.language === 'sub' ? 'sub only' : 'dub', c.series ? (c.follow ? 'following' : 'in Sonarr') : 'not in Sonarr yet'].join(' · ') }))];
-      sug.loading = false; drawSuggest(q);
-    }, 220);
-  }
-  function choose(x) {
-    closeSuggest();
-    if (!x.has) { nameSearch(x.title); return; }   // not in Sonarr: the results panel has "Add to Sonarr"
-    if (x.lang) setSeg('lang', x.lang);
-    openShow(x.slug);
-  }
-  $('url').addEventListener('input', suggest);
-  $('url').addEventListener('focus', suggest);
-  $('url').addEventListener('blur', () => setTimeout(closeSuggest, 120));
-  $('url').addEventListener('paste', () => setTimeout(() => { if (isLink($('url').value)) { closeSuggest(); openShow($('url').value); } }, 0));
-  $('url').addEventListener('keydown', (ev) => {
-    const open = !$('suggest').hidden, n = sug.items.length;
-    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
-      if (!open) { suggest(); return; }
-      if (!n) return;
-      ev.preventDefault();
-      sug.active = ev.key === 'ArrowDown' ? (sug.active + 1) % n : (sug.active - 1 + n) % n;
-      drawSuggest($('url').value.trim());
-      $('sopt' + sug.active)?.scrollIntoView({ block: 'nearest' });
-    } else if (ev.key === 'Enter' && open && sug.active >= 0) {
-      ev.preventDefault(); choose(sug.items[sug.active]);
-    } else if (ev.key === 'Escape' && open) {
-      ev.preventDefault(); ev.stopPropagation(); closeSuggest();
-    }
-  });
-  $('suggest').addEventListener('mousedown', (ev) => ev.preventDefault());   // keep the focus in the box
-  $('suggest').addEventListener('click', (ev) => { const o = ev.target.closest('.sopt'); if (o) choose(sug.items[+o.dataset.n]); });
-  $('suggest').addEventListener('pointermove', (ev) => {
-    const o = ev.target.closest('.sopt'); if (!o || +o.dataset.n === sug.active) return;
-    sug.active = +o.dataset.n;
-    $('suggest').querySelectorAll('.sopt').forEach((x) => x.setAttribute('aria-selected', String(+x.dataset.n === sug.active)));
-  });
-  $('sclear').onclick = () => { $('url').value = ''; $('url').focus(); suggest(); };
+  // The header's search box is ui.js's (the jump panel). Here it opens a show, a search or the queue in place.
+  UI.hooks.openShow = (slug, language) => { if (language) setSeg('lang', language); openShow(slug); };
+  UI.hooks.link = (url) => openShow(url);
+  UI.hooks.search = (words) => nameSearch(words);
+  UI.hooks.queue = () => openQueue(true);
+  UI.hooks.refresh = () => { lastQ = null; loadAttention(true); poll(); };
 
   // ---------- Motion: small, quick, and off when the system asks for less ----------
   // A panel that appears rises a few pixels; a progress bar slides from where it was instead of jumping.
@@ -669,6 +587,7 @@
     const pauseLabel = qstate.paused ? 'Resume' : 'Pause';   // drawn only when it changes, so a press is never lost to a redraw
     if ($('pausebtn').dataset.l !== pauseLabel) { $('pausebtn').dataset.l = pauseLabel; $('pausebtn').innerHTML = UI.icon(qstate.paused ? 'play' : 'pause') + pauseLabel; }
     $('pausebtn').setAttribute('aria-pressed', String(!!qstate.paused));
+    UI.setPaused(qstate.paused);
     loadAttention();
     applyRuns(); renderQueue(); renderHome();
     if (wasActive && !showActive() && !queueErr) {
@@ -895,6 +814,7 @@
     const was = new Map(followed.map((x) => [x.slug, x])), first = !followedLoaded;
     const same = !first && JSON.stringify(list) === JSON.stringify(followed);
     followed = list; followedLoaded = true;
+    UI.setFollowed(list);
     if (!same) {
       renderHome();
       if (first && homeY && view === 'home') scrollTo(0, homeY);
@@ -1100,7 +1020,7 @@
   homeY = q || find ? 0 : y0;
   loadFollowed();
   if (q) openShow(q, { push: false, y: y0 });
-  else if (find && isLink(find)) openShow(find, { push: false, y: y0 });
+  else if (find && UI.isLink(find)) openShow(find, { push: false, y: y0 });
   else if (find) { $('url').value = find; $('sclear').hidden = false; $('skey').hidden = true; nameSearch(find, { push: false, y: y0 }); poll(); }
   else poll();
 })();

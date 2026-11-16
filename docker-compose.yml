@@ -10,7 +10,9 @@ services:
       - "${SERVER_PORT:-3000}:3000"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
-      - SERVER_PORT=${SERVER_PORT:-3000}
+      # Inside the container the app always listens on 3000. SERVER_PORT in .env only changes the port on this
+      # machine (the mapping above); passing it in here made the app listen where nothing was mapped.
+      - SERVER_PORT=3000
       - BYPARR_URL=http://byparr:8191
       - SONARR_URL=${SONARR_URL:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}

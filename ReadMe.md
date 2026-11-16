@@ -17,7 +17,9 @@ wco-dl is a Command-line program and web application to download cartoons/anime/
    DOWNLOADS_DIR=/path/to/downloads/wco-dl
    ```
 
-2. Start it. This fetches the ready-made image (`ghcr.io/ozzymousprime/wco-dl:latest`), so nothing is built:
+2. Start it. This fetches the ready-made image (`ghcr.io/ozzymousprime/wco-dl:latest`), so nothing is built. The
+   first start downloads several gigabytes (mostly the browser the Cloudflare helper runs), so give it a while.
+   If port 3000 is taken, add `SERVER_PORT=3001` (or any free port) to `.env` and use that port below:
 
    ```bash
    docker compose up -d

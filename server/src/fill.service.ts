@@ -275,7 +275,7 @@ export class FillService implements OnApplicationBootstrap {
   // Promise.all([...]) left the first call's rejection unhandled, and Node stopped the server (14 Nov 2026).
   private async sonarr<T = any>(method: 'get' | 'post' | 'put', url: string, data?: unknown): Promise<T> {
     const { sonarrUrl, sonarrApiKey } = this.config;
-    if (!sonarrApiKey) throw new BadRequestException('This screen needs Sonarr: set SONARR_URL and SONARR_API_KEY, then restart wco-dl');
+    if (!sonarrApiKey) throw new BadRequestException('This screen needs Sonarr. Connect it in Settings.');
     return axios.request<T>({ method, url: `${sonarrUrl}/api/v3/${url}`, data, timeout: 120000,
       headers: { 'X-Api-Key': sonarrApiKey } }).then((r) => r.data);
   }
@@ -885,6 +885,16 @@ export class FillService implements OnApplicationBootstrap {
   private factsRead = false;
   private factsTried = 0;
   private factsRefresh?: Promise<void>;
+
+  /** Sonarr's address or key was changed in Settings: nothing remembered from the old one may be shown as the new one's. */
+  sonarrChanged() {
+    this.seriesCache = undefined;
+    this.splitCache = undefined;
+    this.facts = undefined;
+    this.factsRead = true;
+    this.factsTried = 0;
+    void fs.rm(this.factsFile, { force: true }).catch(() => undefined);
+  }
 
   /** True while those facts are being refreshed: the screen asks for the list again until this turns false. */
   get followedRefreshing(): boolean { return !!this.factsRefresh; }

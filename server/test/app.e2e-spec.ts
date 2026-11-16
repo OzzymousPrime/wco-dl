@@ -28,6 +28,13 @@ describe('AppController (e2e)', () => {
 
   beforeAll(async () => {
     byparr = createServer((req, res) => {
+      // The setup check-up only looks whether the helper answers at all (the real one redirects "/" to its docs).
+      if (req.method === 'GET') {
+        res.statusCode = 307;
+        res.setHeader('Location', '/docs');
+        res.end();
+        return;
+      }
       let body = '';
       req.on('data', (chunk) => (body += chunk));
       req.on('end', () => {
@@ -346,6 +353,39 @@ describe('AppController (e2e)', () => {
     const res = await request(app.getHttpServer()).get('/followed').expect(200);
     expect(res.body).toEqual([]);
     expect(res.headers['x-followed-refreshing']).toBeUndefined();
+  });
+
+  it('answers the setup check-up on a fresh install, and takes no settings that are not JSON', async () => {
+    const state = await request(app.getHttpServer()).get('/setup/state').expect(200);
+    expect(state.body).toEqual({ sonarr: false, locked: false, unlocked: true });
+    const res = await request(app.getHttpServer()).get('/setup').expect(200);
+    expect(res.body).toMatchObject({ ready: false, sonarr: { state: 'unset', hasKey: false }, folder: { state: 'waiting' }, helper: { state: 'ok' }, lock: { on: false } });
+    await request(app.getHttpServer()).post('/setup/sonarr').type('form').send('url=http://sonarr').expect(415);
+    await request(app.getHttpServer()).post('/setup/sonarr').send({ url: 'not an address', apiKey: 'k' }).expect(400);
+  });
+
+  it('locks the settings, and only the settings, when a password is set', async () => {
+    process.env.ADMIN_PASSWORD = 'e2e password';
+    try {
+      await request(app.getHttpServer()).get('/setup').expect(401);
+      await request(app.getHttpServer()).post('/setup/sonarr').send({ url: 'http://sonarr', apiKey: 'k' }).expect(401);
+      await request(app.getHttpServer()).post('/settings').send({ nightBudget: 5 }).expect(401);
+      await request(app.getHttpServer()).get('/settings').expect(200);     // the rest of the app stays open
+      await request(app.getHttpServer()).get('/followed').expect(200);
+      expect((await request(app.getHttpServer()).get('/setup/state').expect(200)).body).toEqual({ sonarr: false, locked: true, unlocked: false });
+      await request(app.getHttpServer()).post('/setup/unlock').send({ password: 'not it' }).expect(401);
+      const ok = await request(app.getHttpServer()).post('/setup/unlock').send({ password: 'e2e password' }).expect(200);
+      const set = String(ok.headers['set-cookie'][0]);
+      expect(set).toMatch(/^wco_admin=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict/);
+      const cookie = set.split(';')[0];
+      const res = await request(app.getHttpServer()).get('/setup').set('Cookie', cookie).expect(200);
+      expect(res.body.lock).toEqual({ on: true, from: 'env' });
+      expect(JSON.stringify(res.body)).not.toContain('e2e password');
+      await request(app.getHttpServer()).post('/setup/signout').set('Cookie', cookie).send({}).expect(200);
+      await request(app.getHttpServer()).get('/setup').set('Cookie', cookie).expect(401);
+    } finally {
+      delete process.env.ADMIN_PASSWORD;
+    }
   });
 
   it('returns 404 for unknown downloads', async () => {

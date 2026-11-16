@@ -15,6 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { SetupGuard } from './setup.controller';
 import { AppService } from './app.service';
 import { ContentItem } from './content-list';
 import {
@@ -225,7 +226,7 @@ export class AppController {
   }
 
   @Post('settings')
-  @UseGuards(JsonRequestGuard)
+  @UseGuards(SetupGuard, JsonRequestGuard)
   async saveSettings(@Body() body: any) {
     if (body?.dubToken) await this.dubCalendar.setToken(body.dubToken);
     return { ...(await this.fillService.setSettings(body)), hasDubToken: await this.dubCalendar.hasToken() };

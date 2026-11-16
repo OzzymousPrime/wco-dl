@@ -11,6 +11,8 @@ import { appConfigProvider } from './app-config.provider';
 import { FillService } from './fill.service';
 import { DubCalendarService } from './dub-calendar.service';
 import { WcoEpisodesService } from './wco-episodes.service';
+import { SetupController, SetupGuard } from './setup.controller';
+import { SetupService } from './setup.service';
 
 @Module({
   imports: [
@@ -20,7 +22,7 @@ import { WcoEpisodesService } from './wco-episodes.service';
     }),
     ScheduleModule.forRoot(),
   ],
-  controllers: [AppController],
+  controllers: [AppController, SetupController],
   providers: [
     appConfigProvider,
     AppService,
@@ -29,6 +31,8 @@ import { WcoEpisodesService } from './wco-episodes.service';
     DubCalendarService,
     WcoEpisodesService,
     ScheduledTaskService,
+    SetupService,
+    SetupGuard,
   ],
 })
 export class AppModule {}

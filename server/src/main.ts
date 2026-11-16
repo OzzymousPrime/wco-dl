@@ -28,7 +28,7 @@ async function bootstrap() {
   logger.log(`Listening on port ${appConfig.port}`);
   logger.log(`Byparr: ${appConfig.byparrUrl}`);
   logger.log(
-    `Sonarr: ${appConfig.sonarrUrl}${appConfig.sonarrApiKey ? '' : ' (SONARR_API_KEY not set, imports disabled)'}`,
+    `Sonarr: ${appConfig.sonarrUrl}${appConfig.sonarrApiKey ? '' : ' (no key yet: connect it on the Settings page)'}`,
   );
 }
 bootstrap();

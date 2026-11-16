@@ -157,7 +157,9 @@ export class SetupService implements OnModuleInit {
     }
     try {
       const r = await axios.request<any>({ method: 'get', url: `${sonarrUrl}/api/v3/filesystem`, timeout: 20000,
-        params: { path: sonarrPath, includeFiles: true }, headers: { 'X-Api-Key': sonarrApiKey } });
+        // Without the last flag Sonarr reads a path that has no trailing slash as a half-typed name and lists its
+        // parent instead (seen on Sonarr 5, 16 Nov 2026): the file is never found and every mapping looks wrong.
+        params: { path: sonarrPath, includeFiles: true, allowFoldersWithoutTrailingSlashes: true }, headers: { 'X-Api-Key': sonarrApiKey } });
       const seen = (r.data?.files ?? []).some((f: { name?: string }) => f?.name === name);
       return seen
         ? { state: 'ok', sonarrPath, message: importBase ? `Sonarr sees it at ${sonarrPath}` : 'Sonarr sees it at the same path' }

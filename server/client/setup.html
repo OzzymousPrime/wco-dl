@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · wco-dl</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script>try{var a=localStorage.getItem('wco-accent');if(a)document.documentElement.dataset.accent=a;var t=localStorage.getItem('wco-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="header.css">
+<link rel="stylesheet" href="map.css">
+<link rel="stylesheet" href="setup.css">
+</head>
+<body class="ui">
+<div class="page narrow">
+  <header class="top ui" id="top" data-page="settings"></header>
+
+  <main>
+  <section class="show">
+    <div>
+      <h1 id="title">Settings</h1>
+      <div class="where" id="lead">What wco-dl needs to work, tested each time you open this page.</div>
+    </div>
+    <div class="setuptally"><span id="tally" role="status"></span><button class="btn btn-quiet" id="again" type="button" hidden></button></div>
+  </section>
+
+  <div id="status" class="status" role="status">Testing Sonarr, the download folder and the Cloudflare helper.</div>
+
+  <form id="unlock" class="unlock" hidden>
+    <p>These settings are locked with a password.</p>
+    <label for="u-pass">Password</label>
+    <input id="u-pass" type="password" autocomplete="current-password" required>
+    <p class="serr" id="u-err" role="alert" hidden></p>
+    <div class="fbtns"><button class="btn btn-primary" type="submit" id="u-go">Unlock</button></div>
+  </form>
+
+  <ul class="steps" id="steps" hidden></ul>
+
+  <div class="finish" id="finish" hidden>
+    <a class="btn btn-primary" id="open" href="/map.html"></a>
+    <span class="hint" id="openhint"></span>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  </main>
+</div>
+<script src="ui.js"></script>
+<script src="setup.js"></script>
+</body>
+</html>

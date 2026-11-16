@@ -117,6 +117,8 @@ describe('SetupService', () => {
     expect(s.ready).toBe(true);
     expect(cfg.sonarrImportBase).toBe('/downloads/wco-dl');
     expect(await fs.readdir(out)).toEqual([]);                                   // every test file was cleared away
+    // Asked so that Sonarr lists the folder itself, not its parent (it does that for a path with no trailing slash).
+    expect(asked.filter((a) => a.url.endsWith('/filesystem')).every((a) => a.params.includeFiles && a.params.allowFoldersWithoutTrailingSlashes)).toBe(true);
     // "The same path" can be saved on purpose, over a mapping from .env: an empty answer is kept as an answer.
     sonarrSees = (p) => (p === out ? out : '');
     await svc.saveFolder({ importBase: '' });

@@ -1,0 +1,43 @@
+/* Setup and Settings (16 Nov 2026). One list: each line is something wco-dl needs, with a mark that says whether it
+   works and a form that opens in place. Tokens, buttons and the header come from header.css; page basics from map.css. */
+.page.narrow main{max-width:760px}
+.setuptally{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--text-2);font-size:13px;font-variant-numeric:tabular-nums}
+
+.steps{list-style:none;margin:0 0 20px;padding:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.steps>li{border-top:1px solid var(--line);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.steps>li:first-child{border-top:0}
+.steps h2{font-size:14px;font-weight:500;margin:0;line-height:1.5}
+.shead{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;min-width:0}
+.stext{flex:1 1 200px;min-width:0;display:flex;flex-direction:column}
+.sline{color:var(--text-2);font-size:13px;overflow-wrap:anywhere}
+.sline.bad{color:var(--err)}
+.mark{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--text);font-size:12px;font-weight:600;line-height:1}
+.mark.ok{border-color:var(--text-2)}
+.mark.bad{border-color:var(--err);color:var(--err)}
+.mark .ico{width:12px;height:12px;stroke-width:2}
+
+.sform,.unlock{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sform{padding-left:32px}
+.unlock{max-width:440px;margin-bottom:20px}
+.sform label,.unlock label{font-size:13px;color:var(--text-2);margin-top:6px}
+.sform input,.unlock input{height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;width:100%;max-width:440px;min-width:0}
+.sform input:focus-visible,.unlock input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sform p,.unlock p{margin:0;font-size:13px;color:var(--text-2);max-width:62ch}
+.sform code{font-family:var(--mono);font-size:12px;color:var(--text);overflow-wrap:anywhere}
+.sform .serr,.unlock .serr{color:var(--err)}
+.fbtns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.steps .btn:disabled,.unlock .btn:disabled{opacity:.5;cursor:default}
+
+/* Picking the folder as Sonarr sees it */
+.browse{border:1px solid var(--line);border-radius:8px;max-width:440px;overflow:hidden;margin-top:4px}
+.bhead{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:4px 6px 4px 10px;border-bottom:1px solid var(--line);font-size:12px;color:var(--text-2);min-height:36px}
+.bhead code{min-width:0}
+.browse ul{list-style:none;margin:0;padding:4px;max-height:216px;overflow:auto}
+.browse li button{all:unset;box-sizing:border-box;display:flex;gap:8px;align-items:center;width:100%;min-height:32px;padding:2px 8px;border-radius:6px;cursor:pointer;font-size:13px;overflow-wrap:anywhere}
+.browse li button:hover{background:var(--surface-2)}
+.browse li button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.browse .none{padding:8px 10px;font-size:13px;color:var(--muted)}
+
+.finish{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.finish .btn[aria-disabled=true]{opacity:.5;pointer-events:none}
+@media (max-width:520px){.sform{padding-left:0}}

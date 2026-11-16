@@ -366,10 +366,18 @@
     if (q && !q.dataset.touched) q.value = settings.quality;
   }
   document.getElementById('q')?.addEventListener('change', (ev) => { ev.target.dataset.touched = '1'; });
+  // A newcomer: nothing on these screens can work until Sonarr is connected, so they lead to setup. (The original
+  // downloader page works without Sonarr and stays put. An older server has no such route and answers 404.)
+  if (['home', 'library', 'calendar'].includes(page)) {
+    fetch('/setup/state').then((r) => (r.ok ? r.json() : null)).then((st) => { if (st && st.sonarr === false) location.replace('/setup.html'); }).catch(() => undefined);
+  }
   const loaded = fetch('/settings').then((r) => (r.ok ? r.json() : settings)).then((s) => { settings = { ...settings, ...s }; showSettings(); }).catch(() => undefined);
   if (theme) {
-    const cog = document.createElement('button');
-    cog.className = 'btn btn-quiet'; cog.id = 'settingsbtn'; cog.type = 'button'; cog.setAttribute('aria-label', 'Settings'); cog.title = 'Settings';
+    // The cog leads to the Settings page (setup.html): connections and their tests. The dialog built below holds the
+    // day-to-day choices (overnight hours, quality, the dub calendar token) and opens from that page.
+    const cog = document.createElement('a');
+    cog.className = 'btn btn-quiet'; cog.id = 'settingsbtn'; cog.href = '/setup.html'; cog.setAttribute('aria-label', 'Settings'); cog.title = 'Settings';
+    if (page === 'settings') cog.setAttribute('aria-current', 'page');
     cog.innerHTML = icon('cog');
     theme.after(cog);
     const hours = [...Array(24).keys()].map((h) => `<option value="${h}">${hh(h)}</option>`).join('');
@@ -395,7 +403,7 @@
     </form>`;
     document.body.append(dlg);
     const f = (id) => dlg.querySelector('#' + id);
-    cog.onclick = async () => {
+    UI.openSettings = async () => {
       await loaded;
       f('s-from').value = settings.nightFrom; f('s-to').value = settings.nightTo; f('s-budget').value = settings.nightBudget; f('s-quality').value = settings.quality;
       f('s-token').value = ''; f('s-token').placeholder = settings.hasDubToken ? 'Saved. Type a new one to replace it' : 'Paste the token';
@@ -418,6 +426,7 @@
         if (token) body.dubToken = token;
         const r = await fetch('/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const d = await r.json().catch(() => ({}));
+        if (r.status === 401) return err('These settings are locked with a password. Unlock them on the Settings page, then save again.');
         if (!r.ok) return err(d.message ? [].concat(d.message).join('; ') : `The server answered ${r.status}`);
         settings = { ...settings, ...d }; showSettings(); dlg.close();
         if (token && /calendar\.html$/.test(location.pathname)) location.reload();

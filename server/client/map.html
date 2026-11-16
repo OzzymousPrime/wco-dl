@@ -91,9 +91,9 @@
     <div class="fhead" id="fhead"><h2>Followed shows <span class="count" id="fcount"></span></h2>
       <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span> · <span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span> </span><button class="btn btn-quiet" id="recount" type="button" data-icon="refresh">Recount</button><span class="grow"></span>
       <div class="seg" role="group" aria-label="Which followed shows" id="fkind">
-        <button type="button" data-v="all" aria-pressed="true">All</button><button type="button" data-v="incomplete" aria-pressed="false">Incomplete <span class="count" id="fincomplete"></span></button>
+        <button type="button" data-v="incomplete" aria-pressed="true">Incomplete <span class="count" id="fincomplete"></span></button><button type="button" data-v="all" aria-pressed="false">All <span class="count" id="fall"></span></button>
       </div>
-      <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off" hidden></div>
+      <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off"></div>
     <!-- Until the first answer arrives the list holds four still, grey rows, so the screen is never blank. -->
     <ul class="flist" id="followedlist" aria-busy="true">
       <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:62%"></i><i style="width:40%"></i></span></li>

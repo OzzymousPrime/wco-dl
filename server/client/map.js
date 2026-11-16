@@ -809,7 +809,7 @@
   // The list answers at once from what the server last knew. While it asks Sonarr again behind that answer it says so
   // in a header (X-Followed-Refreshing: 1): then the list is asked for again every 2 seconds, for 45 seconds at most,
   // and redrawn only if something changed; a row whose counts changed fades briefly.
-  let followed = [], followedLoaded = false, refreshT = null, refreshUntil = 0, homeY = 0;
+  let followed = [], followedLoaded = false, refreshT = null, refreshUntil = 0, homeY = 0, fkindSet = false;
   async function loadFollowed() {
     clearTimeout(refreshT);
     let list, refreshing = false;
@@ -857,11 +857,14 @@
     const needs = (x) => x.missing > 0 || x.undub > 0;
     const counted = followed.map((x) => x.countedAt).filter(Boolean).sort()[0];
     $('fcounted').textContent = counted ? `counted ${when(counted)}` : 'not counted yet, so dub swaps are not shown';
+    // The list opens on what needs work: Incomplete, or All when nothing is incomplete. After that the choice is yours.
+    const here = followed.filter((x) => !gone.has(x.slug)), lacking = here.filter(needs).length;
+    if (!fkindSet) { fkindSet = true; setSeg('fkind', lacking ? 'incomplete' : 'all'); }
     const incomplete = $('fkind').querySelector('[aria-pressed=true]').dataset.v === 'incomplete';
-    $('fincomplete').textContent = String(followed.filter(needs).length);
+    $('fincomplete').textContent = String(lacking); $('fall').textContent = String(here.length);
     const list = followed.filter((x) => !gone.has(x.slug) && (!f || name(x).toLowerCase().includes(f)) && (!incomplete || needs(x))).sort((a, b) => name(a).localeCompare(name(b), 'en', { sensitivity: 'base' }));
-    $('fhead').hidden = !followed.length; $('ffilter').hidden = followed.length <= 12;
-    $('fcount').textContent = followed.length ? String(followed.length) : '';
+    $('fhead').hidden = !followed.length;
+    $('fcount').textContent = here.length ? String(here.length) : '';
     $('fnone').textContent = !followed.length ? 'Paste a show link above to see its episodes. Shows you follow are listed here.'
       : !list.length ? (f ? `No followed show matches "${$('ffilter').value.trim()}".` : 'Every followed show has all its aired episodes, in the audio you follow it in.') : '';
     $('fnone').hidden = !$('fnone').textContent;
@@ -946,7 +949,7 @@
     $('recount').disabled = false;
   };
   $('ffilter').addEventListener('input', renderHome);
-  $('fkind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setSeg('fkind', b.dataset.v); renderHome(); } });
+  $('fkind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { fkindSet = true; setSeg('fkind', b.dataset.v); renderHome(); } });
   $('ffilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('followedlist').querySelector('a')?.click(); });
 
   // On a phone the key to the squares and the numbering switch live inside the how-to, so the squares start sooner (15 Nov 2026).

@@ -4,7 +4,9 @@
   const $ = (id) => document.getElementById(id);
   const UI = window.wcoUI;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const KINDS = [['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['maybe', 'Needs a pick'], ['none', 'No match']];
+  // The screen opens on the rows that need a decision from you (several wcostream shows could be the one: pick it),
+  // when there are any; "All" and the other states are one press away.
+  const KINDS = [['maybe', 'Needs a decision'], ['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['none', 'No match']];
   const kindOf = (r) => (r.state === 'exact' ? 'ready' : r.state);
   let rows = [], drive = 'all', kind = 'all';
 
@@ -31,14 +33,20 @@
     const sum = (a, k) => a.reduce((n, r) => n + r[k], 0);
     const n = (k) => rows.filter((r) => kindOf(r) === k);
     $('tally').innerHTML = `<span><b>${rows.length}</b> series with work</span><span><b>${sum(rows, 'gaps').toLocaleString('en-GB')}</b> episodes missing</span>` +
-      `<span><b>${n('following').length}</b> following</span><span><b>${n('linked').length}</b> linked, not followed</span><span><b>${n('ready').length}</b> ready to follow</span><span><b>${n('maybe').length}</b> need a pick</span><span><b>${n('none').length}</b> no match</span>`;
-    const ready = list.filter((r) => kindOf(r) === 'ready');
+      `<span><b>${n('following').length}</b> following</span><span><b>${n('linked').length}</b> linked, not followed</span><span><b>${n('ready').length}</b> ready to follow</span><span><b>${n('maybe').length}</b> need a decision</span><span><b>${n('none').length}</b> no match</span>`;
+    const ready = readyRows();
     $('followall').hidden = !ready.length;
-    $('followlabel').textContent = `Follow the ${ready.length} ready to follow${list.length !== rows.length ? ' shown' : ''}`;
+    $('followlabel').textContent = `Follow the ${ready.length} ready to follow${ready.length !== n('ready').length ? ' in this folder or filter' : ''}`;
     $('rows').innerHTML = list.length ? [...new Set(list.map((r) => r.root))].map((root) => {
       const g = list.filter((r) => r.root === root);
       return `<h2 class="group"><code>${esc(root)}</code><span class="hint">${g.length} series · ${sum(g, 'gaps').toLocaleString('en-GB')} episodes missing</span></h2><ul class="lib">${g.map(row).join('')}</ul>`;
     }).join('') : '<p class="empty">Nothing here matches.</p>';
+  }
+
+  // What "Follow the n ready to follow" acts on: the ready rows of the folder and name filter in use, whichever state tab is open.
+  function readyRows() {
+    const f = $('filter').value.trim().toLowerCase();
+    return rows.filter((r) => (drive === 'all' || r.root === drive) && kindOf(r) === 'ready' && (!f || r.title.toLowerCase().includes(f)));
   }
 
   function row(r) {
@@ -111,9 +119,7 @@
   }
 
   $('followall').onclick = async () => {
-    const f = $('filter').value.trim().toLowerCase();
-    const items = rows.filter((r) => (drive === 'all' || r.root === drive) && kindOf(r) === 'ready' && (kind === 'all' || kind === 'ready') && (!f || r.title.toLowerCase().includes(f)))
-      .map((r) => ({ r, c: choice(r) })).filter((x) => x.c);
+    const items = readyRows().map((r) => ({ r, c: choice(r) })).filter((x) => x.c);
     if (!items.length) return;
     $('followall').disabled = true;
     try { await follow(items); } catch (e) { status(`Could not follow them: ${e.message}`, true); }
@@ -127,6 +133,7 @@
     try {
       const data = await api('GET', '/library/gaps');
       rows = data.rows;
+      kind = rows.some((r) => kindOf(r) === 'maybe') ? 'maybe' : 'all';
       status(data.catalogueErrors.length ? `Part of wcostream's catalogue could not be read, so some matches are missing (${data.catalogueErrors.join('; ')}). Reload to try again.` : '', data.catalogueErrors.length > 0);
       $('lib').hidden = false; render();
     } catch (e) { status(`Could not read the library: ${e.message}`, true); }

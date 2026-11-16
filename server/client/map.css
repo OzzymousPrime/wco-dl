@@ -204,8 +204,6 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .btn[aria-pressed=true]#pausebtn{background:var(--jp-soft);border-color:var(--jp-line);color:var(--jp)}
 #attention{margin-bottom:32px;scroll-margin-top:16px}
 .alist{list-style:none;margin:0;padding:0}
-.alist li{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:8px;margin:0 -8px;border-radius:8px;border-bottom:1px solid var(--line);font-size:13px}
-.alist li:hover{background:var(--surface-2)}
 .alist b{font-weight:500}
 .alist .msg{display:block;color:var(--text-2);font-size:12px;overflow-wrap:anywhere}
 .alist .acts{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
@@ -213,7 +211,6 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .alist pre{grid-column:1/-1;margin:0;padding:12px;border-radius:8px;background:var(--bg);border:1px solid var(--line);font:12px/1.5 var(--mono);color:var(--text-2);white-space:pre-wrap;max-height:320px;overflow:auto}
 .foot{margin-top:32px}
 .foot a{color:inherit}
-@media (max-width:720px){.alist li{grid-template-columns:48px minmax(0,1fr)}.alist .acts{grid-column:1/-1;justify-content:flex-start}}
 
 /* A file whose audio is not labelled (11 Nov 2026): looks like any library file, with a "?" and a pointer cursor in Dub mode */
 .cell.unknown:not([aria-disabled=true]){cursor:pointer}
@@ -249,7 +246,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .enter{animation:rise var(--mid) var(--ease) both}
 .fresh .cell{animation:rise 200ms var(--ease) both;animation-delay:calc(var(--i,0) * 7ms)}
 .cell.pop{animation:pop 260ms var(--ease)}
-.flist li,.lib li,.alist li,.qeps li{transition:background-color var(--fast) var(--ease)}
+.flist li,.lib li,.qeps li{transition:background-color var(--fast) var(--ease)}
 .slabel span,.gapmark,.live{transition:color var(--fast) var(--ease)}
 .queue,#attention{scroll-margin-top:72px}
 
@@ -365,11 +362,9 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 #showposter{flex:none;width:64px;height:96px}
 /* Queue, Needs you, Library gaps and Dub calendar rows */
 .qrun header .poster{margin-right:-2px}
-.alist li{grid-template-columns:28px 56px minmax(0,1fr) auto}
 .lib li{grid-template-columns:28px minmax(0,1.2fr) 190px minmax(0,1.3fr) 190px}
 .cal li{grid-template-columns:56px 28px minmax(0,1.6fr) minmax(0,1fr) 136px}
 @media (max-width:720px){
-  .alist li{grid-template-columns:28px 48px minmax(0,1fr)}
   .lib li{grid-template-columns:28px minmax(0,1fr) auto}
   .cal li{grid-template-columns:56px 28px minmax(0,1fr)}
   .cal .ep,.cal .acts{grid-column:3}
@@ -386,3 +381,25 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .fhead .btn{height:28px;padding:0 8px;font-size:12px;gap:6px}
 .flist .btn{height:32px;padding:0 8px;font-size:13px;gap:6px}
 @media (pointer:coarse){.fhead .btn,.flist .btn{height:auto}}
+
+/* "Needs you" by show (15 Nov 2026): a row per show, its episodes behind a disclosure */
+.alist > li{padding:8px;margin:0 -8px;border-radius:8px;border-bottom:1px solid var(--line);font-size:13px;transition:background-color var(--fast) var(--ease)}
+.alist > li:hover{background:var(--surface-2)}
+.ahead{display:flex;gap:8px 12px;align-items:center;min-width:0}
+.ahead .ft{flex:1 1 160px}
+.ahead b{font-size:14px;overflow-wrap:anywhere}
+.linkbtn.more::after{content:"";display:inline-block;width:6px;height:6px;margin-left:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);vertical-align:3px}
+.linkbtn.more[aria-expanded=true]::after{transform:rotate(-135deg);vertical-align:0}
+.aeps{list-style:none;margin:8px 0 0 40px;padding:0;border-top:1px solid var(--line)}
+.aeps li{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.aeps li:last-child{border-bottom:0}
+.aeps .aend{display:flex;justify-content:flex-end;padding:8px 0 0}
+.alist > li.amore{border-bottom:0;padding:12px 8px}
+.alist > li.amore:hover{background:none}
+@media (max-width:720px){
+  .ahead{flex-wrap:wrap}
+  .ahead .acts{flex-basis:100%;justify-content:flex-start;padding-left:40px}
+  .aeps{margin-left:0}
+  .aeps li{grid-template-columns:48px minmax(0,1fr)}
+  .aeps .acts{grid-column:1/-1;justify-content:flex-start}
+}

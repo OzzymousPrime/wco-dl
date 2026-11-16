@@ -882,33 +882,50 @@
         `<button class="btn btn-quiet danger" data-unfollow type="button" aria-label="Unfollow ${esc(name(x))}">${UI.icon('x')}Unfollow</button></li>` };
     }));
   }
-  // Needs you: one row per episode whose newest attempt did not end in the library. The premium label says all the
-  // server's message does ("Premium only on wcostream: monitored and searched in Sonarr"), so that row shows the label alone.
+  // Needs you, by show (15 Nov 2026): one row per show with what went wrong in a line, one Retry for all of its
+  // episodes that can be retried, and its episodes behind a disclosure with their own Retry, Log and Dismiss. The first
+  // ten shows are listed, the rest behind "Show all". The counts in the heading and the header stay episode counts.
+  // The premium label says all the server's message does, so a premium episode shows the label alone.
   const ATTN = { failed: 'Failed', kept: 'Downloaded, not imported', premium: 'Premium-only: Sonarr is searching' };
-  let lastAttn = null;
+  const ATTN_SHORT = { failed: 'failed', kept: 'not imported', premium: 'premium only' };
+  const canRetry = (a) => a.state === 'failed' || a.state === 'kept';
+  const aopen = new Set(), alog = new Map(); let aall = false;
+  function attnGroups() {
+    const by = new Map();
+    for (const a of attnShown()) { const k = 'g' + (a.seriesId || a.slug); if (!by.has(k)) by.set(k, { key: k, show: a.show, slug: a.slug, seriesId: a.seriesId, eps: [] }); by.get(k).eps.push(a); }
+    for (const g of by.values()) g.eps.sort((x, y) => x.s - y.s || x.e - y.e);
+    return [...by.values()];
+  }
   function renderAttention() {
-    const shown = attnShown();
-    $('attention').hidden = !shown.length;
-    $('attnhead').textContent = shown.length ? String(shown.length) : '';
-    const open = new Set([...document.querySelectorAll('#attnlist pre')].map((p) => p.dataset.key));
-    const html = shown.map((a) => {
-      const key = a.jobId + ':' + a.id;
-      return `<li data-job="${a.jobId}" data-ep="${a.id}">${UI.poster(a.seriesId, a.show)}<span class="code">${a.s}x${pad(a.e)}</span><span class="what"><b>${esc(a.show)}</b> ${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
-        <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
-        <span class="acts">${a.state === 'premium' ? '' : `<button class="btn" data-a="retry" type="button">${UI.icon('retry')}Retry</button>`}<button class="linkbtn" data-a="log" type="button">Log</button>
-        <a class="linkbtn" href="/map.html?url=${encodeURIComponent(a.slug)}">Open map</a><button class="linkbtn danger" data-a="dismiss" type="button">Dismiss</button></span>
-        ${open.has(key) ? `<pre data-key="${key}">Loading…</pre>` : ''}</li>`;
-    }).join('');
-    if (html === lastAttn) return;
-    lastAttn = html; $('attnlist').innerHTML = html;
-    for (const k of open) attnLog(k);
+    const groups = attnGroups(), n = groups.reduce((t, g) => t + g.eps.length, 0);
+    $('attention').hidden = !n;
+    $('attnhead').textContent = n ? String(n) : '';
+    const rows = (aall ? groups : groups.slice(0, 10)).map((g) => {
+      const count = (st) => g.eps.filter((a) => a.state === st).length, states = Object.keys(ATTN_SHORT).filter(count);
+      const what = states.length === 1 ? ATTN_SHORT[states[0]] : states.map((st) => `${count(st)} ${ATTN_SHORT[st]}`).join(', ');
+      const again = g.eps.filter(canRetry).length, open = aopen.has(g.key), id = 'aeps-' + g.key;
+      return { key: g.key, html: `<li><div class="ahead">${UI.poster(g.seriesId, g.show)}<span class="ft"><b>${esc(g.show)}</b><span class="msg">${g.eps.length} episode${g.eps.length === 1 ? '' : 's'} · ${what}</span></span>
+        <span class="acts">${again ? `<button class="btn" data-g="retry" type="button" aria-label="Retry ${again} episode${again === 1 ? '' : 's'} of ${esc(g.show)}">${UI.icon('retry')}Retry ${again}</button>` : ''}
+        <a class="linkbtn" href="/map.html?url=${encodeURIComponent(g.slug)}">Open map</a>
+        <button class="linkbtn more" data-g="open" type="button" aria-expanded="${open}" aria-controls="${id}" aria-label="Episodes of ${esc(g.show)}">Episodes</button></span></div>` +
+        (open ? `<ul class="aeps" id="${id}">${g.eps.map((a) => {
+          const key = akey(a);
+          return `<li data-job="${a.jobId}" data-ep="${a.id}"><span class="code">${a.s}x${pad(a.e)}</span><span class="what">${esc(a.title)}${a.mode === 'swap' ? ' <span class="tag">swap</span>' : ''}
+            <span class="msg">${esc(ATTN[a.state])}${a.message && a.state !== 'premium' ? ': ' + esc(a.message) : ''} · ${when(a.at)}${a.auto ? ' · overnight' : ''}</span></span>
+            <span class="acts">${canRetry(a) ? `<button class="btn" data-a="retry" type="button">${UI.icon('retry')}Retry</button>` : ''}<button class="linkbtn" data-a="log" type="button" aria-expanded="${alog.has(key)}">Log</button>
+            <button class="linkbtn danger" data-a="dismiss" type="button">Dismiss</button></span>
+            ${alog.has(key) ? `<pre data-key="${key}">${esc(alog.get(key))}</pre>` : ''}</li>`;
+        }).join('')}${g.eps.length > 1 ? `<li class="aend"><button class="linkbtn danger" data-g="dismiss" type="button">Dismiss all ${g.eps.length}</button></li>` : ''}</ul>` : '') + '</li>' };
+    });
+    if (!aall && groups.length > 10) rows.push({ key: 'more', html: `<li class="amore"><button class="linkbtn" data-more type="button">Show all ${groups.length} shows</button></li>` });
+    UI.patchList($('attnlist'), rows);
   }
   async function attnLog(key) {
     const [jid, eid] = key.split(':');
-    const li = $('attnlist').querySelector(`li[data-job="${jid}"][data-ep="${eid}"]`); if (!li) return;
-    let pre = li.querySelector('pre');
-    if (!pre) { pre = document.createElement('pre'); pre.dataset.key = key; li.appendChild(pre); }
-    try { const r = await fetch(`/fill/jobs/${jid}/log/${eid}`); pre.textContent = await r.text(); } catch (e) { pre.textContent = 'Could not read the log: ' + e.message; }
+    alog.set(key, 'Loading…'); renderAttention();
+    let text;
+    try { const r = await fetch(`/fill/jobs/${jid}/log/${eid}`); text = await r.text(); } catch (e) { text = 'Could not read the log: ' + e.message; }
+    if (alog.has(key)) { alog.set(key, text); renderAttention(); }
   }
   // Dismiss acts on screen at once and offers Undo; there is no un-dismiss on the server, so the requests are held
   // back until the toast leaves. Rows dismissed one after another share one toast, and one Undo brings them all back.
@@ -931,16 +948,35 @@
       },
       undo: () => { if (batch === mine) batch = []; for (const a of mine) dismissed.delete(akey(a)); showAttention(); } });
   }
+  // A row that goes takes the focus with it: put it on the nearest thing left in the list, or the page's heading.
+  const keepFocus = (had) => { if (had && !$('attnlist').contains(document.activeElement)) ($('attnlist').querySelector('a,button') || $('pagetitle')).focus({ preventScroll: true }); };
   $('attnlist').addEventListener('click', async (ev) => {
+    if (ev.target.closest('[data-more]')) {
+      aall = true; renderAttention();
+      $('attnlist').children[10]?.querySelector('a,button')?.focus({ preventScroll: true });
+      return;
+    }
+    const gb = ev.target.closest('[data-g]');
+    if (gb) {
+      const g = attnGroups().find((x) => x.key === gb.closest('#attnlist > li').dataset.key); if (!g) return;
+      if (gb.dataset.g === 'open') { if (aopen.has(g.key)) aopen.delete(g.key); else aopen.add(g.key); renderAttention(); return; }
+      if (gb.dataset.g === 'dismiss') { dismiss(g.eps); keepFocus(true); return; }
+      const rows = g.eps.filter(canRetry); let n = 0;
+      gb.disabled = true;
+      for (const a of rows) { try { await api('POST', `/fill/jobs/${a.jobId}/retry/${a.id}`, {}); n++; } catch { /* it stays in the list */ } }
+      toast(n === rows.length ? `Queued ${n} episode${n === 1 ? '' : 's'} of ${g.show} again: partial downloads resume` : `Queued ${n} of ${rows.length} again; the rest could not be queued`);
+      await loadAttention(true); keepFocus(true); poll();
+      return;
+    }
     const b = ev.target.closest('[data-a]'); if (!b) return;
-    const li = b.closest('li'), jid = li.dataset.job, eid = li.dataset.ep;
-    if (b.dataset.a === 'log') { const pre = li.querySelector('pre'); if (pre) pre.remove(); else attnLog(jid + ':' + eid); return; }
-    if (b.dataset.a === 'dismiss') { const a = attention.find((x) => x.jobId === jid && String(x.id) === eid); if (a) dismiss([a]); return; }
+    const li = b.closest('li'), jid = li.dataset.job, eid = li.dataset.ep, key = jid + ':' + eid;
+    if (b.dataset.a === 'log') { if (alog.has(key)) { alog.delete(key); renderAttention(); } else attnLog(key); return; }
+    if (b.dataset.a === 'dismiss') { const a = attention.find((x) => x.jobId === jid && String(x.id) === eid); if (a) { dismiss([a]); keepFocus(true); } return; }
     try {
       await api('POST', `/fill/jobs/${jid}/retry/${eid}`, {});
       toast('Queued again: it resumes a partial download');
     } catch (e) { status(`Could not retry that episode: ${e.message}`, true); }
-    await loadAttention(true); poll();
+    await loadAttention(true); keepFocus(true); poll();
   });
   $('recount').onclick = async () => {
     $('recount').disabled = true; toast('Counting every followed show in Sonarr. This takes a minute.');

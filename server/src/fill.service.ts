@@ -130,6 +130,8 @@ export function retryDue(airDate: string, tries: { n: number; last: string } | u
 
 /** What the followed list takes from Sonarr, as last seen: per series id, [episodes, episodes with a file] and second folders. */
 interface FollowedFacts { at: number; ids: number[]; stats: Record<number, [number, number]>; split: Record<number, string[]> }
+/** Sonarr's series list is used without asking again for this long. */
+const SERIES_FRESH_MS = 5 * 60 * 1000;
 const FACTS_FRESH_MS = 5 * 60 * 1000;
 const FACTS_RETRY_MS = 60 * 1000;
 
@@ -168,6 +170,8 @@ export class FillService implements OnApplicationBootstrap {
   private paused = false;
 
   async onApplicationBootstrap() {
+    // Sonarr's series list is slow on a big library: fetch it now, so the first screen that needs it does not wait.
+    if (this.config.sonarrApiKey) setTimeout(() => this.fetchSeries().catch(() => undefined), 0);
     try {
       this.jobs = JSON.parse(await fs.readFile(this.jobsFile, 'utf8'));
       // A restart cut these off: queue them again. The downloader resumes a partial file (11 Nov 2026).
@@ -286,10 +290,31 @@ export class FillService implements OnApplicationBootstrap {
   }
 
   async allSeries(): Promise<any[]> {
-    if (this.seriesCache && Date.now() - this.seriesCache.at < 5 * 60 * 1000) return this.seriesCache.list;
-    const list = await this.sonarr<any[]>('get', 'series');
-    this.seriesCache = { at: Date.now(), list };
-    return list;
+    if (this.seriesCache && Date.now() - this.seriesCache.at < SERIES_FRESH_MS) return this.seriesCache.list;
+    return this.fetchSeries();
+  }
+
+  /**
+   * For screens that should not wait on Sonarr (its whole list takes seconds on a big library): the last list at
+   * once, even if it is older than five minutes, refreshed behind. Waits only when there is no list yet.
+   */
+  async allSeriesNow(): Promise<any[]> {
+    if (!this.seriesCache) return this.fetchSeries();
+    if (Date.now() - this.seriesCache.at >= SERIES_FRESH_MS) this.fetchSeries().catch(() => undefined);
+    return this.seriesCache.list;
+  }
+
+  /** True while Sonarr's series list is being fetched. */
+  get seriesRefreshing(): boolean { return !!this.seriesFetch; }
+
+  private seriesFetch?: Promise<any[]>;
+  private seriesGen = 0;
+  /** One fetch at a time; a list fetched from a Sonarr that has since been changed in Settings is thrown away. */
+  private fetchSeries(): Promise<any[]> {
+    const gen = this.seriesGen;
+    return (this.seriesFetch ??= this.sonarr<any[]>('get', 'series')
+      .then((list) => { if (gen === this.seriesGen) this.seriesCache = { at: Date.now(), list }; return list; })
+      .finally(() => { this.seriesFetch = undefined; }));
   }
 
   /**
@@ -889,6 +914,8 @@ export class FillService implements OnApplicationBootstrap {
   /** Sonarr's address or key was changed in Settings: nothing remembered from the old one may be shown as the new one's. */
   sonarrChanged() {
     this.seriesCache = undefined;
+    this.seriesGen++;
+    this.seriesFetch = undefined;
     this.splitCache = undefined;
     this.facts = undefined;
     this.factsRead = true;
@@ -1115,7 +1142,7 @@ export class FillService implements OnApplicationBootstrap {
   private warming = 0;
 
   async calendarInfo<T extends { seriesId?: number; title: string; date: string; estimate: boolean }>(rows: T[], catalogue: CatalogueItem[]) {
-    const [all, prefs] = await Promise.all([this.allSeries(), this.prefs()]);
+    const [all, prefs] = await Promise.all([this.allSeriesNow(), this.prefs()]);
     const bySeries = new Map(all.map((s) => [s.id, s]));
     const links = new Map<number, { slug: string; pref: ShowPref }>();
     for (const [slug, pref] of Object.entries(prefs)) {

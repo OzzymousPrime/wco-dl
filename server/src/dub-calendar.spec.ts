@@ -86,7 +86,7 @@ describe('DubCalendarService', () => {
       await fs.writeFile(path.join(dir, 'animeschedule.token'), 'token-0123456789');
       const fresh = { ...raw[0], episodeDate: new Date(Date.now() + 2 * 86400000).toISOString() };
       const get = jest.spyOn(axios, 'get').mockImplementation(() => new Promise((ok) => setTimeout(() => ok({ data: [fresh] }), 60)) as any);
-      const svc = new DubCalendarService({ configDir: dir } as AppConfig, { allSeries: async () => [] } as any);
+      const svc = new DubCalendarService({ configDir: dir } as AppConfig, { allSeriesNow: async () => [] } as any);
 
       const t = Date.now();
       const first = await svc.calendar();

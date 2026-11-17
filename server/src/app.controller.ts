@@ -243,7 +243,7 @@ export class AppController {
     const items: CatalogueItem[] = got.flatMap((list, i) =>
       (list ?? []).filter((x) => x.kind === 'series').map((x) => ({ name: x.name, path: x.path, list: lists[i] })));
     const rows = await this.fillService.calendarInfo(c.rows, items);
-    if (got.some((l) => !l) || this.dubCalendar.refreshing || this.fillService.calendarWarming) res.setHeader('X-Calendar-Refreshing', '1');
+    if (got.some((l) => !l) || this.dubCalendar.refreshing || this.fillService.calendarWarming || this.fillService.seriesRefreshing) res.setHeader('X-Calendar-Refreshing', '1');
     return { ...c, rows };
   }
 

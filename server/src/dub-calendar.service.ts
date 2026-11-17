@@ -91,7 +91,7 @@ export class DubCalendarService {
   async calendar(force = false) {
     const data = await this.load(force);
     if ('needsToken' in data) return { needsToken: true as const, rows: [] as CalendarRow[] };
-    const series = await this.fill.allSeries();
+    const series = await this.fill.allSeriesNow();
     const matched = matchSeries(data.entries, series);
     const from = new Date(); from.setHours(0, 0, 0, 0);
     const rows: CalendarRow[] = project(data.entries).filter((e) => new Date(e.date) >= from).map((e) => {

@@ -547,3 +547,41 @@ describe('posters', () => {
     await expect(new FillService(config('k')).poster(42)).rejects.toThrow('No poster');       // a login page is not a picture
   });
 });
+
+describe('FillService: Sonarr series list for screens', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('gives the last list at once and refreshes it behind, waits only when there is none, and asks once at a time', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'series-'));
+    try {
+      let n = 0;
+      jest.spyOn(axios, 'request').mockImplementation(async () => {
+        const mine = ++n;
+        await new Promise((r) => setTimeout(r, 60));
+        return { data: [{ id: mine, title: `list ${mine}` }] };
+      });
+      const svc = new FillService({ sonarrUrl: 'http://sonarr', sonarrApiKey: 'k', configDir: dir } as unknown as AppConfig);
+      const [a, b] = await Promise.all([svc.allSeriesNow(), svc.allSeries()]);
+      expect(n).toBe(1);
+      expect(a).toBe(b);
+
+      (svc as any).seriesCache.at -= 10 * 60 * 1000;          // older than five minutes
+      const t = Date.now();
+      const stale = await svc.allSeriesNow();
+      expect(Date.now() - t).toBeLessThan(40);
+      expect(stale[0].title).toBe('list 1');
+      expect(svc.seriesRefreshing).toBe(true);
+      for (let i = 0; i < 100 && svc.seriesRefreshing; i++) await new Promise((r) => setTimeout(r, 10));
+      expect((await svc.allSeriesNow())[0].title).toBe('list 2');
+
+      // A list still on its way from a Sonarr that has since been changed in Settings is not kept.
+      (svc as any).seriesCache.at -= 10 * 60 * 1000;
+      void svc.allSeriesNow();
+      svc.sonarrChanged();
+      for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 10));
+      expect((svc as any).seriesCache).toBeUndefined();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    }
+  });
+});

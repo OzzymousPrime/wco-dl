@@ -574,6 +574,10 @@ describe('FillService: Sonarr series list for screens', () => {
       for (let i = 0; i < 100 && svc.seriesRefreshing; i++) await new Promise((r) => setTimeout(r, 10));
       expect((await svc.allSeriesNow())[0].title).toBe('list 2');
 
+      // Over an hour old: not served, the screen waits for a new one.
+      (svc as any).seriesCache.at -= 2 * 60 * 60 * 1000;
+      expect((await svc.allSeriesNow())[0].title).toBe('list 3');
+
       // A list still on its way from a Sonarr that has since been changed in Settings is not kept.
       (svc as any).seriesCache.at -= 10 * 60 * 1000;
       void svc.allSeriesNow();

@@ -132,6 +132,8 @@ export function retryDue(airDate: string, tries: { n: number; last: string } | u
 interface FollowedFacts { at: number; ids: number[]; stats: Record<number, [number, number]>; split: Record<number, string[]> }
 /** Sonarr's series list is used without asking again for this long. */
 const SERIES_FRESH_MS = 5 * 60 * 1000;
+/** Screens may be shown a list up to this old while a new one is fetched; older than this they wait. */
+const SERIES_STALE_OK_MS = 60 * 60 * 1000;
 const FACTS_FRESH_MS = 5 * 60 * 1000;
 const FACTS_RETRY_MS = 60 * 1000;
 
@@ -296,10 +298,10 @@ export class FillService implements OnApplicationBootstrap {
 
   /**
    * For screens that should not wait on Sonarr (its whole list takes seconds on a big library): the last list at
-   * once, even if it is older than five minutes, refreshed behind. Waits only when there is no list yet.
+   * once, even if it is older than five minutes, refreshed behind. Waits when there is none, or it is over an hour old.
    */
   async allSeriesNow(): Promise<any[]> {
-    if (!this.seriesCache) return this.fetchSeries();
+    if (!this.seriesCache || Date.now() - this.seriesCache.at >= SERIES_STALE_OK_MS) return this.fetchSeries();
     if (Date.now() - this.seriesCache.at >= SERIES_FRESH_MS) this.fetchSeries().catch(() => undefined);
     return this.seriesCache.list;
   }
@@ -355,7 +357,7 @@ export class FillService implements OnApplicationBootstrap {
     if (this.splitCache && Date.now() - this.splitCache.at < 10 * 60 * 1000) return this.splitCache.map;
     const map = new Map<number, string[]>();
     try {
-      const [all, roots] = await Promise.all([this.allSeries(), this.sonarr<any[]>('get', 'rootfolder')]);
+      const [all, roots] = await Promise.all([this.allSeriesNow(), this.sonarr<any[]>('get', 'rootfolder')]);
       const base = (p: string) => String(p ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
       const byKey = new Map<string, Set<number>>();
       for (const s of all) for (const k of new Set([normaliseTitle(s.title), normaliseTitle(base(s.path))])) {
@@ -442,8 +444,10 @@ export class FillService implements OnApplicationBootstrap {
     let parsed;
     try { parsed = parseShowLink(link); } catch (e) { throw new BadRequestException((e as Error).message); }
     const prefs = await this.prefs();
-    const all = await this.allSeries();
+    let all = await this.allSeriesNow();
     let seriesId = seriesIdParam ? Number(seriesIdParam) : prefs[parsed.slug]?.seriesId;
+    // Added in Sonarr since the list was fetched: ask again rather than say it is not there.
+    if (seriesId && !all.some((s) => s.id === seriesId)) all = await this.fetchSeries();
     const candidates = matchSeries(parsed.slug, all);
     if (!seriesId && candidates.length === 1) seriesId = candidates[0].id;
     const brief = (s: any) => ({ id: s.id, title: s.title, year: s.year, path: s.path });
@@ -473,7 +477,7 @@ export class FillService implements OnApplicationBootstrap {
 
   /** For wcostream search results: is each show in Sonarr (by its remembered link, else by one exact name match), and is it followed? */
   async inSonarr<T extends { slug: string }>(matches: T[]) {
-    const [all, prefs] = await Promise.all([this.allSeries(), this.prefs()]);
+    const [all, prefs] = await Promise.all([this.allSeriesNow(), this.prefs()]);
     return matches.map((m) => {
       const pref = prefs[m.slug];
       // Without a remembered link only an exact name counts: a near match ("Life" for "Life With an Ordinary Guy...") is a guess.
@@ -488,7 +492,7 @@ export class FillService implements OnApplicationBootstrap {
   async searchSeries(q: string) {
     const want = String(q ?? '').toLowerCase().trim();
     if (want.length < 2) return [];
-    return (await this.allSeries())
+    return (await this.allSeriesNow())
       .filter((s) => s.title.toLowerCase().includes(want))
       .slice(0, 20)
       .map((s) => ({ id: s.id, title: s.title, year: s.year, path: s.path }));
@@ -870,7 +874,7 @@ export class FillService implements OnApplicationBootstrap {
    * known, or else the wcostream shows of the same name. Live action is left out: wcostream does not carry it.
    */
   async libraryGaps(catalogue: CatalogueItem[]) {
-    const [all, prefs] = await Promise.all([this.allSeries(), this.prefs()]);
+    const [all, prefs] = await Promise.all([this.allSeriesNow(), this.prefs()]);
     const links = new Map<number, { slug: string; pref: ShowPref }>();
     for (const [slug, pref] of Object.entries(prefs)) {
       const had = links.get(pref.seriesId);

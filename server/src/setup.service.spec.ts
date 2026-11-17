@@ -195,6 +195,22 @@ describe('SetupService', () => {
     await expect(svc.setLock({ password: 'another one' })).rejects.toThrow(/ADMIN_PASSWORD/);
   });
 
+  it('tests the download folder with a file once, then remembers the pass instead of writing on every visit', async () => {
+    const svc = await service(config({ sonarrApiKey: KEY }));
+    const tests = () => asked.filter((a) => a.url.endsWith('/filesystem') && a.params?.includeFiles).length;
+    expect((await svc.status()).folder.state).toBe('ok');
+    expect((await svc.status()).folder.state).toBe('ok');
+    expect(tests()).toBe(1);
+    expect(await fs.readdir(out)).toEqual([]);
+    // Test and save always tests, and a failure is never remembered as a pass.
+    await expect(svc.saveFolder({ importBase: '/somewhere/else' })).rejects.toThrow(/does not see/);
+    expect(tests()).toBe(2);
+    // After a restart it is tested again, once.
+    const again = await service(config({ sonarrApiKey: KEY }));
+    await again.status(); await again.status();
+    expect(tests()).toBe(3);
+  });
+
   it('runs on the start-up values when the saved file cannot be read', async () => {
     await fs.mkdir(path.join(dir, 'config'), { recursive: true });
     await fs.writeFile(path.join(dir, 'config', 'connections.json'), '{"sonarrUrl": "http://');

@@ -81,6 +81,12 @@ export class SetupService implements OnModuleInit {
   private saved: Saved = {};
   private readonly sessions = new Map<string, number>();
   private failed: number[] = [];
+  /**
+   * The folder test writes a file into the downloads folder, so it is not repeated on every visit: a pass is
+   * remembered for exactly what it proved (this folder, this Sonarr path, this Sonarr and key) until the app restarts.
+   * A failure is not remembered, so the page tests again until it passes.
+   */
+  private folderPass?: { key: string; result: Check & { sonarrPath: string } };
   /** The container's environment: read for ADMIN_PASSWORD and to say whether a value came from .env. */
   protected env: NodeJS.ProcessEnv = process.env;
 
@@ -143,10 +149,19 @@ export class SetupService implements OnModuleInit {
    * and look for the file. This is the one setting people get wrong, and without it every import fails later.
    * `importBase` is always given: leaving it out must mean "the same path", never "whatever is saved now".
    */
-  private async checkFolder(importBase: string | undefined, sonarrOk = true): Promise<Check & { sonarrPath: string }> {
+  private async checkFolder(importBase: string | undefined, sonarrOk = true, reuse = false): Promise<Check & { sonarrPath: string }> {
     const { outputBase, sonarrUrl, sonarrApiKey } = this.config;
     const sonarrPath = pathForSonarr(outputBase, outputBase, importBase);
     if (!sonarrOk || !sonarrApiKey) return { state: 'waiting', message: 'Checked once Sonarr is connected', sonarrPath };
+    const key = JSON.stringify([outputBase, sonarrPath, sonarrUrl, sha(sonarrApiKey).toString('hex')]);
+    if (reuse && this.folderPass?.key === key) return this.folderPass.result;
+    const result = await this.testFolder(importBase, sonarrPath, sonarrApiKey);
+    if (result.state === 'ok') this.folderPass = { key, result }; else if (this.folderPass?.key === key) this.folderPass = undefined;
+    return result;
+  }
+
+  private async testFolder(importBase: string | undefined, sonarrPath: string, sonarrApiKey: string): Promise<Check & { sonarrPath: string }> {
+    const { outputBase, sonarrUrl } = this.config;
     const name = `.wco-dl-check-${randomBytes(6).toString('hex')}`;
     const marker = path.join(outputBase, name);
     try {
@@ -183,7 +198,7 @@ export class SetupService implements OnModuleInit {
 
   async status(): Promise<SetupStatus> {
     const [sonarr, helper] = await Promise.all([this.checkSonarr(), this.checkHelper()]);
-    const folder = await this.checkFolder(this.config.sonarrImportBase, sonarr.state === 'ok');
+    const folder = await this.checkFolder(this.config.sonarrImportBase, sonarr.state === 'ok', true);
     const lock = this.lockState();
     return {
       ready: sonarr.state === 'ok' && folder.state === 'ok',

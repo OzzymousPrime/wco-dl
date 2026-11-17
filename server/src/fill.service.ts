@@ -27,7 +27,9 @@ import {
   parsePremium,
   parseProgress,
   parseShowLink, CatalogueItem, CatalogueMatch, indexCatalogue, matchCatalogue, audioStatus, catalogueKey, normaliseTitle,
+  playVerdict, Probe,
 } from './fill.util';
+import { diskState, DiskState, lowDiskMessage } from './disk-space';
 import { WcoEpisodesService } from './wco-episodes.service';
 import { fileIsEpisode, fileTitle, latestText, linkTitle, numberingFit, NumberingFit, resolveSources, Source } from './wco-episodes.util';
 
@@ -91,6 +93,8 @@ interface ShowPref {
   unlisted?: { ids: number[]; at: string };
   /** From the last numbering check: how many episodes that need work the site lists under each way of numbering. */
   numbering?: NumberingFit & { at: string };
+  /** Episodes already announced as new on wcostream in English (the new-dub check), so each is told once. */
+  announced?: number[];
 }
 interface ShowPrefs { [slug: string]: ShowPref }
 
@@ -136,6 +140,11 @@ const SERIES_FRESH_MS = 5 * 60 * 1000;
 const SERIES_STALE_OK_MS = 60 * 60 * 1000;
 const FACTS_FRESH_MS = 5 * 60 * 1000;
 const FACTS_RETRY_MS = 60 * 1000;
+/** The new-dub check looks at episodes aired this many days back. */
+const NEW_DUB_DAYS = 21;
+/** Below the free-space limit the queue looks again this often, and says so at most this often. */
+const DISK_RECHECK_MS = 10 * 60 * 1000;
+const DISK_TELL_MS = 12 * 3600 * 1000;
 
 @Injectable()
 export class FillService implements OnApplicationBootstrap {
@@ -200,7 +209,33 @@ export class FillService implements OnApplicationBootstrap {
   }
 
   // ---------- Queue controls ----------
-  queueState() { return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget }; }
+  async queueState() {
+    const disk = await this.checkDisk();
+    return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget, disk };
+  }
+
+  // ---------- Free space (17 Nov 2026) ----------
+  private disk?: DiskState;
+  private diskTimer?: NodeJS.Timeout;
+  private diskToldAt = 0;
+  private async checkDisk(): Promise<DiskState> {
+    this.disk = await diskState(this.config.outputBase, this.config.minFreeGb ?? 0);
+    return this.disk;
+  }
+  /** Below the limit: nothing starts. Look again in ten minutes, and send a message, at most twice a day. */
+  private async stopForSpace(disk: DiskState) {
+    if (!this.diskTimer) {
+      this.diskTimer = setTimeout(() => { this.diskTimer = undefined; void this.pump(); }, DISK_RECHECK_MS);
+      this.diskTimer.unref?.();
+    }
+    if (Date.now() - this.diskToldAt < DISK_TELL_MS) return;
+    this.diskToldAt = Date.now();
+    this.logger.warn(lowDiskMessage(disk));
+    await this.push('wco-dl stopped: disk nearly full',
+      `${lowDiskMessage(disk)}.\nFree some space and the queue starts again by itself within ten minutes.`,
+      this.config.publicUrl ? `${this.config.publicUrl}/map.html#queue` : undefined)
+      .catch((e) => this.logger.warn(`Disk message failed: ${(e as Error).message}`));
+  }
 
   /** Paused: the episode in hand finishes, nothing new starts (manual or overnight) until resumed. Survives a restart. */
   async setPaused(paused: boolean) {
@@ -639,6 +674,8 @@ export class FillService implements OnApplicationBootstrap {
           this.scheduleWake(); break;
         }
         const ep = job.episodes.find(ready)!;
+        const disk = await this.checkDisk();
+        if (disk.low) { await this.stopForSpace(disk); break; }
         try {
           await this.fillOne(job, ep);
         } catch (err) {
@@ -793,6 +830,16 @@ export class FillService implements OnApplicationBootstrap {
       }
     }
 
+    // Does it play, and is it about as long as an episode (17 Nov 2026)? Only names and sizes were checked, so an
+    // error page saved as a video, or a clip cut short, would have been imported as the episode.
+    const list = ep.s > 0 ? await this.allSeriesNow().catch(() => undefined) : undefined;
+    const runtime = Array.isArray(list) ? list.find((s) => s.id === job.seriesId)?.runtime : undefined;
+    const play: { ok: boolean; why?: string } = playVerdict(await this.probe(want), runtime);
+    if (!play.ok) {
+      ep.state = 'kept'; ep.message = `${play.why}; left in staging, not imported`;
+      return;
+    }
+
     ep.state = 'importing'; ep.progress = 100;
     await this.save();
     const winFolder = this.sonarrPath(out);
@@ -825,6 +872,9 @@ export class FillService implements OnApplicationBootstrap {
       ep.state = 'kept'; ep.message = 'Sonarr did not import it; the file is still in staging';
     }
   }
+
+  /** ffprobe's view of a downloaded file (a method, so tests with a fake downloader can stand in for it). */
+  private probe(file: string) { return probeFile(file); }
 
   private async premiumToSonarr(ep: FillEpisode) {
     await this.sonarr('put', 'episode/monitor', { episodeIds: [ep.id], monitored: true });
@@ -1200,7 +1250,7 @@ export class FillService implements OnApplicationBootstrap {
 
   /** One summary POST to NOTIFY_URL (when set) once the night's automatic runs have finished. */
   private async notifyNight() {
-    const { notifyUrl, notifyToken, publicUrl } = this.config;
+    const { publicUrl } = this.config;
     const since = Date.now() - 20 * 3600 * 1000;
     const runs = this.jobs.filter((j) => j.auto && new Date(j.createdAt).getTime() > since);
     const n = (st: string) => runs.reduce((a, j) => a + j.episodes.filter((e) => e.state === st).length, 0);
@@ -1210,11 +1260,75 @@ export class FillService implements OnApplicationBootstrap {
       (shows.length ? `\nShows: ${shows.slice(0, 8).join(', ')}.` : '') +
       (this.nightNotes.length ? '\n' + this.nightNotes.splice(0).slice(0, 5).join('\n') : '') +
       (await this.attention().then((a) => (a.length ? `\n${a.length} need you: open the link.` : ''), () => ''));
-    this.logger.log(body.replace(/\n/g, ' | '));
+    const disk = await this.checkDisk();
+    const text = body + (disk.low ? `\n${lowDiskMessage(disk)}.` : '');
+    this.logger.log(text.replace(/\n/g, ' | '));
+    await this.push('wco-dl overnight', text, publicUrl ? `${publicUrl}/map.html#attention` : undefined);
+  }
+
+  /** One message to NOTIFY_URL (when set): {source, title, body, url}, with NOTIFY_TOKEN as x-notify-token. */
+  private async push(title: string, body: string, url?: string) {
+    const { notifyUrl, notifyToken } = this.config;
     if (!notifyUrl) return;
-    const url = publicUrl ? `${publicUrl}/map.html#attention` : undefined;
-    await axios.post(notifyUrl, { source: 'wco-dl', title: 'wco-dl overnight', body, url },
+    await axios.post(notifyUrl, { source: 'wco-dl', title, body, url },
       { headers: notifyToken ? { 'x-notify-token': notifyToken } : {}, timeout: 30000 });
+  }
+
+  // ---------- New dubs (17 Nov 2026) ----------
+  /** During the day, four times: see checkNewDubs. The night run reads the same pages for its own plan. */
+  @Cron('0 10,14,18,22 * * *')
+  async newDubsCron() {
+    if (isNight()) return;
+    await this.checkNewDubs().catch((e) => this.logger.warn(`New-dub check: ${(e as Error).message}`));
+  }
+
+  /**
+   * Has wcostream listed in English an episode a followed dub show is waiting for? Only shows with an episode aired in
+   * the last three weeks and no English file are looked at (one Sonarr calendar call finds them), so this is a handful
+   * of page reads, not one per followed show. Each episode is told once; the overnight run fills it either way.
+   */
+  async checkNewDubs(now = new Date()): Promise<{ show: string; slug: string; seriesId: number; episodes: string[] }[]> {
+    if (!this.wco || !this.config.sonarrApiKey) return [];
+    const bySeries = new Map<number, [string, ShowPref]>();
+    for (const [slug, p] of Object.entries(await this.prefs())) if (p.follow && (p.language ?? 'dub') === 'dub') bySeries.set(p.seriesId, [slug, p]);
+    if (!bySeries.size) return [];
+    const from = new Date(now.getTime() - NEW_DUB_DAYS * 86400000);
+    const cal = await this.sonarr<any[]>('get', `calendar?start=${from.toISOString()}&end=${now.toISOString()}&unmonitored=true&includeEpisodeFile=true`);
+    const waiting = new Set<number>();
+    for (const e of cal ?? []) {
+      if (!bySeries.has(e.seriesId) || !(e.seasonNumber > 0)) continue;
+      if (!e.hasFile || audioStatus(e.episodeFile?.mediaInfo?.audioLanguages ?? '') === 'undub') waiting.add(e.seriesId);
+    }
+    const found: { show: string; slug: string; seriesId: number; episodes: string[]; ids: number[] }[] = [];
+    const day = (d: string) => (d ? new Date(d.length === 10 ? d + 'T12:00:00Z' : d).getTime() : NaN);
+    for (const seriesId of waiting) {
+      const [slug, pref] = bySeries.get(seriesId)!;
+      try {
+        const told = new Set(pref.announced ?? []);
+        const map = await this.mapEpisodes(seriesId);
+        const due = map.filter((e) => (e.st === 'missing' || e.st === 'undub') && !told.has(e.id) && day(e.a) >= from.getTime() && day(e.a) <= now.getTime());
+        if (!due.length) continue;
+        const listing = await this.wco.listing(slug, 'dub');
+        if (!listing) continue;
+        const sources = resolveSources(listing, map, !!pref.absolute);
+        const there = due.filter((e) => { const s = sources.get(e.id); return !!s && s.kind !== 'none'; });
+        if (there.length) found.push({ show: pref.title ?? slug, slug, seriesId, ids: there.map((e) => e.id), episodes: there.map((e) => `${e.s}x${pad(e.e)}`) });
+      } catch (err) { this.logger.warn(`New-dub check for ${slug}: ${(err as Error).message}`); }
+    }
+    if (!found.length) return [];
+    await this.changePrefs((fresh) => {
+      for (const f of found) if (fresh[f.slug]) fresh[f.slug].announced = [...(fresh[f.slug].announced ?? []), ...f.ids].slice(-300);
+    });
+    const hh = (h: number) => String(h).padStart(2, '0') + ':00';
+    const body = `In English on wcostream now: ${found.slice(0, 8).map((f) => `${f.show} ${f.episodes.join(', ')}`).join('; ')}` +
+      (found.length > 8 ? `; and ${found.length - 8} more shows` : '') + '.' +
+      `\nThe overnight run (${hh(NIGHT.from)} to ${hh(NIGHT.to)}) fills them; open the map to fill one now.`;
+    this.logger.log(body.replace(/\n/g, ' | '));
+    const { publicUrl } = this.config;
+    const url = publicUrl ? `${publicUrl}/map.html` + (found.length === 1 ? `?url=${encodeURIComponent(found[0].slug)}` : '') : undefined;
+    await this.push(found.length === 1 ? `New dub: ${found[0].show}` : `New dubs: ${found.length} shows`, body, url)
+      .catch((e) => this.logger.warn(`New-dub message failed: ${(e as Error).message}`));
+    return found.map(({ ids, ...f }) => f);
   }
 
   /** The downloader's own output for one episode of a run, for the queue view. */
@@ -1303,6 +1417,20 @@ async function listFiles(dir: string): Promise<string[]> {
     else out.push(p);
   }
   return out;
+}
+
+/** What ffprobe says about a file; undefined when there is no ffprobe to ask (or it hung), which never blocks an import. */
+async function probeFile(file: string): Promise<Probe | undefined> {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type',
+      '-of', 'json', file], { timeout: 60000 });
+    const j = JSON.parse(stdout);
+    const seconds = Number(j.format?.duration);
+    return { read: true, video: (j.streams ?? []).some((s: any) => s.codec_type === 'video'), seconds: Number.isFinite(seconds) ? seconds : undefined };
+  } catch (e: any) {
+    if (e?.code === 'ENOENT' || e?.killed) return undefined;
+    return { read: false, video: false };
+  }
 }
 
 async function audioTags(file: string): Promise<string[]> {

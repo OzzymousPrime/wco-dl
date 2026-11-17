@@ -24,6 +24,8 @@ export interface AppConfig {
   downloadIdleTimeoutMs: number;
   /** Downloads from the Browse page that run at once; the rest wait their turn (MAX_PARALLEL_DOWNLOADS, default 3). */
   maxParallelDownloads: number;
+  /** Nothing new starts while the downloads folder's drive has less free than this, in GB (MIN_FREE_GB, default 20; 0 turns it off). */
+  minFreeGb: number;
   puid: string | undefined;
   pgid: string | undefined;
   webhookUrls: string[];
@@ -65,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // Each downloader asks wcostream, and often Cloudflare, for pages of its own: a batch of 50 started together
     // looks like an attack and gets the address blocked. Three at a time keeps a batch moving without that.
     maxParallelDownloads: Math.min(toInt(env.MAX_PARALLEL_DOWNLOADS, 3), 20),
+    minFreeGb: env.MIN_FREE_GB !== undefined && /^\d+$/.test(env.MIN_FREE_GB.trim()) ? Number(env.MIN_FREE_GB.trim()) : 20,
     puid: env.PUID || undefined,
     pgid: env.PGID || undefined,
     webhookUrls: (env.WEBHOOK_URLS || '')

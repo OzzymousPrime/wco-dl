@@ -193,6 +193,26 @@ export function searchCatalogue(items: CatalogueItem[], q: string, limit = 12): 
  * here carry "und" (11 Nov 2026: 4,436 of 4,783 files without an English tag), so "no English tag" must never be
  * read as "Japanese": an unlabelled file is only ever replaced when a person picks it.
  */
+/** What ffprobe found in a downloaded file. */
+export interface Probe { read: boolean; video: boolean; seconds?: number }
+
+/**
+ * Fit to import (17 Nov 2026)? It must open, hold a video stream, and run at least 20 seconds and, when Sonarr knows
+ * the show's runtime (5 minutes or more), at least 40% of it: a site that packs two 11-minute segments into one episode
+ * still passes against a 22-minute runtime, a two-minute error clip does not. No probe (no ffprobe): fit.
+ */
+export function playVerdict(p: Probe | undefined, runtimeMin?: number): { ok: true } | { ok: false; why: string } {
+  if (!p) return { ok: true };
+  if (!p.read) return { ok: false, why: 'The file would not open (ffprobe could not read it)' };
+  if (!p.video) return { ok: false, why: 'The file has no video in it' };
+  if (p.seconds === undefined) return { ok: true };
+  if (p.seconds < 20) return { ok: false, why: `The file runs only ${Math.round(p.seconds)} seconds` };
+  if (runtimeMin && runtimeMin >= 5 && p.seconds < runtimeMin * 60 * 0.4) {
+    return { ok: false, why: `The file runs ${Math.max(1, Math.round(p.seconds / 60))} minutes; this show's episodes run about ${runtimeMin}` };
+  }
+  return { ok: true };
+}
+
 export function audioStatus(audio: string): 'dub' | 'undub' | 'unknown' {
   const tags = String(audio ?? '').toLowerCase().split(/[\/,\s]+/).filter(Boolean);
   if (tags.some((t) => t.startsWith('en'))) return 'dub';

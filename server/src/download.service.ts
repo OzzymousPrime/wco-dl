@@ -13,6 +13,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { APP_CONFIG } from './app-config.provider';
 import { AppConfig } from './config';
+import { assertSpace, diskState, lowDiskMessage } from './disk-space';
 import { WCO_BASE_URL } from './content-list';
 import { BatchDownload, CreateShow } from './dto/all.dto';
 import { ProcessResult, startProcess } from './process-runner';
@@ -290,6 +291,7 @@ export class DownloadService {
     args: string[],
     options: JobOptions = {},
   ): Promise<DownloadJob> {
+    await assertSpace(this.config.outputBase, this.config.minFreeGb ?? 0);
     const fullArgs = [this.config.pythonScript, ...args];
     const job: DownloadJob = {
       id: randomUUID(),
@@ -322,16 +324,24 @@ export class DownloadService {
         job.error = error.message;
         job.finishedAt = new Date().toISOString();
         void this.notifyWebhooks(job);
+        this.startWaiting();     // its place is free again: the next one gets its turn
       });
     }
   }
 
   private async launch(job: DownloadJob, fullArgs: string[]): Promise<void> {
     const { pythonBin, downloadIdleTimeoutMs } = this.config;
-    this.logger.log(`Starting: ${pythonBin} ${fullArgs.join(' ')}`);
+    // The place is taken before the first await, or startWaiting's loop would start every waiting job at once.
     job.status = 'running';
     job.startedAt = new Date().toISOString();
     this.active++;
+    // A waiting download is checked again when its turn comes: the drive may have filled meanwhile.
+    const disk = await diskState(this.config.outputBase, this.config.minFreeGb ?? 0);
+    if (disk.low) {
+      this.active--;
+      throw new Error('Not started: ' + lowDiskMessage(disk));
+    }
+    this.logger.log(`Starting: ${pythonBin} ${fullArgs.join(' ')}`);
 
     let running;
     try {

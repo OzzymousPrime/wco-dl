@@ -18,6 +18,9 @@ describe('FillService worker', () => {
   let calls: { method: string; url: string; data?: any }[];
   let hasFile: Record<number, boolean>;
   let fakeOut: { file?: string; premium?: boolean };
+  /** What ffprobe "finds" in the fake downloader's one-byte files: a 24-minute video unless a test says otherwise. */
+  let probeAnswer: any;
+  let calendarEps: any[];
 
   const episodes = [
     { id: 101, seasonNumber: 2, episodeNumber: 14, absoluteEpisodeNumber: 39, title: 'Straight Bet', airDate: '2021-01-13', airDateUtc: '2021-01-13T15:00:00Z' },
@@ -49,6 +52,7 @@ describe('FillService worker', () => {
         { id: 9, relativePath: 'x - 2x15.mkv', mediaInfo: { audioLanguages: 'jpn' }, quality: { quality: { name: 'HDTV-1080p' } } },
         { id: 10, relativePath: 'x - 2x16.mkv', mediaInfo: { audioLanguages: 'jpn/eng' }, quality: { quality: { name: 'HDTV-1080p' } } }] };
       if (url.startsWith('series/')) return { data: { id: 575, title: 'Re: ZERO' } };
+      if (url.startsWith('calendar?')) return { data: calendarEps };
       if (url.startsWith('manualimport?')) {
         const folder = decodeURIComponent(url.match(/folder=([^&]+)/)![1]);
         const files = (await fs.readdir(folder)).filter((f) => f.endsWith('.mp4'));
@@ -65,10 +69,20 @@ describe('FillService worker', () => {
       configDir: path.join(dir, 'config'), pythonBin: process.execPath, pythonScript: script, downloadIdleTimeoutMs: 20000,
     } as unknown as AppConfig;
     service = new FillService(config);
+    probeAnswer = { read: true, video: true, seconds: 1440 };
+    calendarEps = [];
+    jest.spyOn(service as any, 'probe').mockImplementation(async () => probeAnswer);
     process.env.FAKE = '{}';
   });
-  // The service may still be writing when a test ends, and Windows refuses to delete until it stops: retry.
-  afterEach(async () => { jest.restoreAllMocks(); await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
+  // The queue may still be saving when a test ends (run() returns once no episode is active, before the last save):
+  // deleting the folder under it failed the next test now and then (EPERM or ENOENT on rename). Let it settle first,
+  // and Windows may still hold a file a moment longer: retry.
+  afterEach(async () => {
+    for (let i = 0; i < 100 && (service as any).running; i++) await new Promise((r) => setTimeout(r, 20));
+    await (service as any).saving?.catch(() => undefined);
+    jest.restoreAllMocks();
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
   let service: FillService;
 
   async function run(episodeIds: number[], fake: object) {
@@ -86,6 +100,64 @@ describe('FillService worker', () => {
     const imp = calls.find((c) => c.data?.name === 'ManualImport');
     expect(imp!.data.files[0].episodeIds).toEqual([101]);
     expect(calls.find((c) => c.url.startsWith('manualimport?'))!.url).not.toMatch(/seriesId/);
+  });
+
+  // 17 Nov 2026: only names and sizes were checked before an import.
+  it('keeps a file that will not open, has no video, or is far shorter than an episode', async () => {
+    probeAnswer = { read: false, video: false };
+    let job = await run([101], { file: 'Re Zero-S02E14-English Dubbed.mp4' });
+    expect(job.episodes[0]).toMatchObject({ state: 'kept', message: expect.stringMatching(/would not open.*not imported/) });
+
+    probeAnswer = { read: true, video: false, seconds: 1400 };
+    job = await run([101], { file: 'Re Zero-S02E14-English Dubbed.mp4' });
+    expect(job.episodes[0].message).toMatch(/no video/);
+
+    (service as any).seriesCache = { at: Date.now(), list: [{ id: 575, title: 'Re: ZERO', runtime: 25 }] };
+    probeAnswer = { read: true, video: true, seconds: 150 };
+    job = await run([101], { file: 'Re Zero-S02E14-English Dubbed.mp4' });
+    expect(job.episodes[0].message).toMatch(/runs 3 minutes; this show's episodes run about 25/);
+    expect(calls.some((c) => c.data?.name === 'ManualImport')).toBe(false);
+
+    probeAnswer = { read: true, video: true, seconds: 11 * 60 };       // one 11-minute segment against 25: imported
+    job = await run([101], { file: 'Re Zero-S02E14-English Dubbed.mp4' });
+    expect(job.episodes[0].state).toBe('done');
+  });
+
+  it('starts nothing while the downloads drive is under the free-space limit', async () => {
+    (service as any).config.minFreeGb = 1e9;                           // more than any drive has
+    const job = await service.createJob({ seriesId: 575, slug: 're-zero', language: 'dub', episodeIds: [101] });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(job.episodes[0].state).toBe('queued');
+    expect(calls.some((c) => c.url.startsWith('manualimport?'))).toBe(false);
+    const { disk } = await service.queueState();
+    expect(disk).toMatchObject({ low: true, minGb: 1e9 });
+    expect(disk.freeGb).toBeGreaterThan(0);
+    clearTimeout((service as any).diskTimer);
+
+    (service as any).config.minFreeGb = 0;                             // 0 turns the check off
+    expect((await service.queueState()).disk.low).toBe(false);
+  });
+
+  it('tells once when wcostream lists in English an episode a followed dub show is waiting for', async () => {
+    await service.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    const W = 'https://www.wcostream.tv/';
+    (service as any).wco = { peek: () => undefined, listing: jest.fn().mockResolvedValue(
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('./wco-episodes.util').buildListing([W + 're-zero-season-2-episode-14-english-dubbed'])) };
+    calendarEps = episodes.map((e) => ({ seriesId: 575, seasonNumber: e.seasonNumber, hasFile: hasFile[e.id],
+      episodeFile: e.id === 102 ? { mediaInfo: { audioLanguages: 'jpn' } } : e.id === 103 ? { mediaInfo: { audioLanguages: 'jpn/eng' } } : undefined }));
+    (service as any).config.notifyUrl = 'http://notify';
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
+    const now = new Date('2021-02-01T12:00:00Z');
+
+    const found = await service.checkNewDubs(now);
+    expect(found).toEqual([{ show: 'Re: ZERO', slug: 're-zero', seriesId: 575, episodes: ['2x14'] }]);   // 2x15 is not listed; 2x16 is in English
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][1]).toMatchObject({ title: 'New dub: Re: ZERO', body: expect.stringContaining('Re: ZERO 2x14') });
+
+    expect(await service.checkNewDubs(now)).toEqual([]);              // told once
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(await service.checkNewDubs(new Date('2021-06-01T12:00:00Z'))).toEqual([]);   // older than three weeks: not looked at
   });
 
   it('keeps a file that is a different episode', async () => {
@@ -213,7 +285,7 @@ describe('FillService worker', () => {
     await service.runNext(second.id);
     expect(service.listJobs().map((j) => j.id)).toEqual([first.id, second.id]);   // listed newest first, so the head of the queue is last
     expect(second.auto).toBe(false);
-    expect(service.queueState().paused).toBe(true);
+    expect((await service.queueState()).paused).toBe(true);
     await service.setPaused(false);
     for (let i = 0; i < 100 && first.episodes[0].state !== 'done'; i++) await new Promise((r) => setTimeout(r, 100));
     expect(first.episodes[0].state).toBe('done');

@@ -24,6 +24,7 @@ function createService(overrides = {}) {
     outputBase: '/tmp/wco-test-output',
     pythonBin: process.execPath,
     pythonScript: fakeScript,
+    minFreeGb: 0,
     ...overrides,
   });
 }
@@ -249,6 +250,15 @@ describe('DownloadService batch downloads', () => {
     } finally {
       clearInterval(watch);
     }
+  });
+
+  // 17 Nov 2026: nothing checked free space before a download.
+  it('refuses to start a download while the drive is under MIN_FREE_GB', async () => {
+    const service = createService({ minFreeGb: 1e9 });
+    const err = await service.startShowDownload({ name: 'naruto' } as any).catch((e) => e);
+    expect(err.getStatus()).toBe(507);
+    expect(err.message).toMatch(/GB free where downloads go, under the 1000000000 GB limit/);
+    expect(service.listJobs()).toEqual([]);
   });
 
   it('starts nothing when any name is invalid', async () => {

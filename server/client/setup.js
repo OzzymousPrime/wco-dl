@@ -68,9 +68,9 @@
   function notifyRow() {
     const x = s.extras;
     const line = x.notifyUrl ? `Sent to ${x.notifyUrl}` : 'Off';
-    if (open !== 'notify') return head('', 'A message when the night is done', line, change('notify', x.notifyUrl ? 'Change' : 'Set up'));
-    return head('', 'A message when the night is done', line) + `<form class="sform" data-form="notify">
-      <p>After the overnight runs, wco-dl can post a short summary to an address of yours, such as an n8n or Home Assistant webhook. Leave the address empty to turn it off.</p>
+    if (open !== 'notify') return head('', 'Messages to your phone', line, change('notify', x.notifyUrl ? 'Change' : 'Set up'));
+    return head('', 'Messages to your phone', line) + `<form class="sform" data-form="notify">
+      <p>wco-dl can post a short message to an address of yours, such as an n8n or Home Assistant webhook: a summary after the overnight runs, a note when a dub you follow appears on wcostream, and a warning if the downloads drive is nearly full and the queue has stopped. Leave the address empty to turn them off.</p>
       <label for="f-nurl">Address to post to</label>
       <input id="f-nurl" type="url" inputmode="url" value="${esc(draft.nurl ?? x.notifyUrl)}" autocomplete="off" spellcheck="false">
       <label for="f-ntok">Token, if that address wants one</label>

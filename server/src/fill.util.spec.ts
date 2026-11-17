@@ -7,7 +7,9 @@ import {
   parsePremium,
   parseProgress,
   parseShowLink,
+  playVerdict,
 } from './fill.util';
+import { judgeDisk } from './disk-space';
 
 describe('parseShowLink', () => {
   it('reads slug and language from a show link', () => {
@@ -82,5 +84,30 @@ describe('dubVerdict', () => {
   it('trusts the name only when the audio is untagged', () => {
     expect(dubVerdict(['und'], 'x English Dubbed.mp4').ok).toBe(true);
     expect(dubVerdict(['und'], 'x English Subbed.mp4').ok).toBe(false);
+  });
+});
+
+describe('playVerdict (17 Nov 2026)', () => {
+  it('passes a file that opens, has video and runs near an episode', () => {
+    expect(playVerdict({ read: true, video: true, seconds: 1420 }, 24).ok).toBe(true);
+    expect(playVerdict({ read: true, video: true, seconds: 660 }, 22).ok).toBe(true);   // one segment of a paired episode
+    expect(playVerdict(undefined, 24).ok).toBe(true);                                   // no ffprobe: never blocks
+    expect(playVerdict({ read: true, video: true }, 24).ok).toBe(true);                 // length unknown
+    expect(playVerdict({ read: true, video: true, seconds: 90 }, 2).ok).toBe(true);     // a shorts series
+  });
+  it('stops one that will not open, has no video, or is far too short', () => {
+    expect(playVerdict({ read: false, video: false }, 24)).toMatchObject({ ok: false, why: expect.stringMatching(/would not open/) });
+    expect(playVerdict({ read: true, video: false, seconds: 1400 }, 24)).toMatchObject({ ok: false, why: expect.stringMatching(/no video/) });
+    expect(playVerdict({ read: true, video: true, seconds: 8 })).toMatchObject({ ok: false, why: 'The file runs only 8 seconds' });
+    expect(playVerdict({ read: true, video: true, seconds: 300 }, 24)).toMatchObject({ ok: false, why: "The file runs 5 minutes; this show's episodes run about 24" });
+  });
+});
+
+describe('judgeDisk', () => {
+  it('is low only under a set limit, and never when the space is unknown', () => {
+    expect(judgeDisk(12.37, 20)).toEqual({ freeGb: 12.3, minGb: 20, low: true });
+    expect(judgeDisk(767, 20).low).toBe(false);
+    expect(judgeDisk(undefined, 20).low).toBe(false);
+    expect(judgeDisk(1, 0).low).toBe(false);
   });
 });

@@ -82,6 +82,7 @@ is saved there wins over `.env`. They are kept in `connections.json` in the conf
 - `BYPARR_MAX_TIMEOUT_MS`: Byparr request timeout (default: `60000`)
 - `DOWNLOAD_IDLE_TIMEOUT_MS`: Download idle timeout (default: `210000`)
 - `MAX_PARALLEL_DOWNLOADS`: Browse-page downloads that run at once; the rest wait (default: `3`, at most `20`)
+- `MIN_FREE_GB`: nothing new starts while the downloads drive has less free than this, in GB (default: `20`; `0` turns it off)
 
 **Webhooks:**
 - `WEBHOOK_URLS`: Comma-separated webhook URLs registered at startup

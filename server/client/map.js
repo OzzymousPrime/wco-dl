@@ -664,9 +664,12 @@
   function nowLine(extra = '') {
     const flat = allRuns.flatMap((j) => j.episodes.map((e) => ({ e, j })));
     const cur = flat.find((x) => isWorking(x.e)), waiting = flat.filter((x) => x.e.state === 'queued');
-    if (!cur && !waiting.length) return '';
     const shows = new Set(waiting.map((x) => x.j.seriesId)).size;
     const wait = waiting.length ? `${waiting.length} waiting${shows > 1 ? ` across ${shows} shows` : ''}` : 'nothing waiting';
+    // Under the free-space limit (17 Nov 2026) nothing starts, so say why, even with nothing waiting: a Browse download would be refused too.
+    const d = qstate.disk;
+    if (d && d.low && !cur) return `<div class="runrow stop"><b>Stopped: disk nearly full</b><span class="what">${esc(String(d.freeGb))} GB free where downloads go, under the ${esc(String(d.minGb))} GB limit. ${waiting.length ? wait + '; nothing' : 'Nothing'} starts until there is room, checked every ten minutes</span><span class="grow"></span>${extra}</div>`;
+    if (!cur && !waiting.length) return '';
     if (qstate.paused && !cur) return `<div class="runrow"><b>Paused</b><span class="what">${wait}; nothing starts until you press Resume in the queue</span><span class="grow"></span>${extra}</div>`;
     if (cur) {
       const p = cur.e.state === 'importing' ? 100 : cur.e.progress ?? 0;

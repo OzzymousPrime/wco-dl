@@ -1,5 +1,6 @@
-# Build stage for Node dependencies
-FROM node:22-alpine AS node-builder
+# Build stage for Node dependencies. It runs on the build machine's own platform even when building for ARM: what it
+# makes (the compiled server and its packages, none of which has native code) is the same on every platform.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-builder
 
 WORKDIR /app/server
 

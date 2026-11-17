@@ -19,6 +19,8 @@ wco-dl is a Command-line program and web application to download cartoons/anime/
 
 2. Start it. This fetches the ready-made image (`ghcr.io/ozzymousprime/wco-dl:latest`), so nothing is built. The
    first start downloads several gigabytes (mostly the browser the Cloudflare helper runs), so give it a while.
+   It runs on ordinary PCs and servers and on 64-bit ARM (a Raspberry Pi 4 or 5 with a 64-bit system, most ARM NAS
+   boxes); 32-bit ARM is not supported because the Cloudflare helper has no build for it.
    If port 3000 is taken, add `SERVER_PORT=3001` (or any free port) to `.env` and use that port below:
 
    ```bash
@@ -245,6 +247,7 @@ The server is configured through environment variables, set in `.env` when using
 | `NOTIFY_URL` / `NOTIFY_TOKEN` | POST a summary `{source, title, body, url}` after the night's runs; the token goes in `x-notify-token` | Unset |
 | `PUBLIC_URL` | This app's address as you open it, for the link in that summary | Unset |
 | `DOWNLOAD_IDLE_TIMEOUT_MS` | Kill a download that produces no output for this long | `210000` |
+| `MAX_PARALLEL_DOWNLOADS` | Downloads from the Browse page that run at once; the rest wait their turn (at most 20) | `3` |
 | `WEBHOOK_URLS` | Comma-separated webhook URLs registered at startup | Unset |
 | `WEBHOOK_ALLOW_INTERNAL` | Allow webhooks to loopback, link-local and private addresses | `false` |
 | `PUID` / `PGID` | Owner of downloaded files | `1000` |

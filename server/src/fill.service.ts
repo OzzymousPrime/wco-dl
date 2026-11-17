@@ -1110,6 +1110,10 @@ export class FillService implements OnApplicationBootstrap {
    * wcostream show it would follow; for one that is not, whether wcostream carries it. Also the latest episode
    * wcostream lists for shows airing now (read in the background; what is not read in 20 seconds shows next time).
    */
+  /** True while show listings the calendar asked for are still being fetched from wcostream. */
+  get calendarWarming(): boolean { return this.warming > 0; }
+  private warming = 0;
+
   async calendarInfo<T extends { seriesId?: number; title: string; date: string; estimate: boolean }>(rows: T[], catalogue: CatalogueItem[]) {
     const [all, prefs] = await Promise.all([this.allSeries(), this.prefs()]);
     const bySeries = new Map(all.map((s) => [s.id, s]));
@@ -1144,7 +1148,12 @@ export class FillService implements OnApplicationBootstrap {
       }
       return { r, key };
     });
-    if (warm.length) await Promise.race([Promise.allSettled(warm), new Promise((ok) => setTimeout(ok, 20000))]);
+    // Fetched behind the answer, not waited for (that wait was most of the calendar's 24 seconds): the screen asks
+    // again while calendarWarming is true and picks up "latest on wcostream" as each listing arrives.
+    if (warm.length) {
+      this.warming++;
+      void Promise.allSettled(warm).finally(() => { this.warming--; });
+    }
     return out.map(({ r, key }) => {
       const i = info.get(key);
       const listing = i.slug && this.wco ? this.wco.peek(i.slug, i.language) : undefined;

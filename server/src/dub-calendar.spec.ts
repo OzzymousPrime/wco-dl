@@ -1,3 +1,9 @@
+import axios from 'axios';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { AppConfig } from './config';
+import { DubCalendarService } from './dub-calendar.service';
 import { isoWeek, looseKey, matchSeries, parseTimetable, project } from './dub-calendar.util';
 
 const raw = [
@@ -66,5 +72,40 @@ describe('dub calendar', () => {
     const two = parseTimetable([raw[0], { ...raw[0], episodeNumber: 8, episodeDate: '2026-11-21T20:30:00Z' }, raw[0]]);
     const rows = project(two, new Date('2026-11-12T00:00:00Z'));
     expect(rows.map((r) => [r.episode, r.estimate])).toEqual([[7, false], [8, false], [9, true], [10, true]]);
+  });
+});
+
+describe('DubCalendarService', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('answers from the last timetable at once and fetches a newer one behind; Refresh waits for it', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cal-'));
+    try {
+      const old = new Date(Date.now() - 13 * 3600 * 1000).toISOString();
+      await fs.writeFile(path.join(dir, 'dub-calendar.json'), JSON.stringify({ fetchedAt: old, entries: [], errors: [] }));
+      await fs.writeFile(path.join(dir, 'animeschedule.token'), 'token-0123456789');
+      const fresh = { ...raw[0], episodeDate: new Date(Date.now() + 2 * 86400000).toISOString() };
+      const get = jest.spyOn(axios, 'get').mockImplementation(() => new Promise((ok) => setTimeout(() => ok({ data: [fresh] }), 60)) as any);
+      const svc = new DubCalendarService({ configDir: dir } as AppConfig, { allSeries: async () => [] } as any);
+
+      const t = Date.now();
+      const first = await svc.calendar();
+      expect(Date.now() - t).toBeLessThan(50);
+      expect(first).toMatchObject({ fetchedAt: old, rows: [] });
+      expect(svc.refreshing).toBe(true);
+      for (let i = 0; i < 100 && svc.refreshing; i++) await new Promise((ok) => setTimeout(ok, 20));
+      expect(svc.refreshing).toBe(false);
+      const second = await svc.calendar();
+      expect(second.fetchedAt).not.toBe(old);
+      expect(second.rows.length).toBeGreaterThan(0);
+
+      const calls = get.mock.calls.length;
+      const forced = await svc.calendar(true);
+      expect(get.mock.calls.length).toBeGreaterThan(calls);
+      expect(svc.refreshing).toBe(false);
+      expect(forced.rows.length).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

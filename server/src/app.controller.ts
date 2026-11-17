@@ -234,11 +234,17 @@ export class AppController {
 
   // Dub calendar (12 Nov 2026): English dub air dates from AnimeSchedule.net, matched to Sonarr.
   @Get('dub-calendar')
-  async dubCalendarRows(@Query('refresh') refresh?: string) {
+  async dubCalendarRows(@Query('refresh') refresh: string | undefined, @Res({ passthrough: true }) res: Response) {
     const c = await this.dubCalendar.calendar(refresh === '1');
     if (c.needsToken) return c;
-    const { items } = await this.catalogue();
-    return { ...c, rows: await this.fillService.calendarInfo(c.rows, items) };
+    // Only what is already cached: a list that is not is fetched behind, and the screen asks again.
+    const lists = ['dubbed', 'cartoon', 'subbed'] as const;
+    const got = await Promise.all(lists.map((l) => this.appService.cachedContentList(l)));
+    const items: CatalogueItem[] = got.flatMap((list, i) =>
+      (list ?? []).filter((x) => x.kind === 'series').map((x) => ({ name: x.name, path: x.path, list: lists[i] })));
+    const rows = await this.fillService.calendarInfo(c.rows, items);
+    if (got.some((l) => !l) || this.dubCalendar.refreshing || this.fillService.calendarWarming) res.setHeader('X-Calendar-Refreshing', '1');
+    return { ...c, rows };
   }
 
   @Get('dub-calendar/series/:id')

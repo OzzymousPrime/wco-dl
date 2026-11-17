@@ -34,6 +34,9 @@ export class DubCalendarService {
 
   async hasToken() { return !!(await this.token()); }
 
+  /** True while a new timetable is being fetched behind an answer that used the last one. */
+  get refreshing(): boolean { return !!this.fetching; }
+
   /** Save a token typed into the settings screen. It is written to the settings folder and never sent back. */
   async setToken(value: unknown) {
     const t = String(value ?? '').trim();
@@ -75,11 +78,13 @@ export class DubCalendarService {
     if (fresh && !force) return this.cache!;
     const token = await this.token();
     if (!token) return this.cache ?? { needsToken: true };
-    this.fetching ??= this.fetchAll(token).finally(() => { this.fetching = undefined; });
-    const got = await this.fetching;
     // A failed refresh keeps yesterday's dates and reports why, instead of showing an empty calendar.
-    this.cache = got.entries.length || !this.cache ? got : { ...this.cache, errors: got.errors };
-    return this.cache;
+    this.fetching ??= this.fetchAll(token)
+      .then((got) => (this.cache = got.entries.length || !this.cache ? got : { ...this.cache, errors: got.errors }))
+      .finally(() => { this.fetching = undefined; });
+    // Six weeks from AnimeSchedule take a while: unless asked to refresh, show the last copy and let this run behind.
+    if (this.cache && !force) { this.fetching.catch(() => undefined); return this.cache; }
+    return this.fetching;
   }
 
   /** The calendar: listed and estimated dub episodes from today on, each with its Sonarr series when one matches. */

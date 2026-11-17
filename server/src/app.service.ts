@@ -67,6 +67,17 @@ export class AppService {
     return pending;
   }
 
+  /**
+   * A list only if it is already cached; otherwise its fetch is started behind (once) and undefined comes back at
+   * once. For screens that should not wait on wcostream.
+   */
+  async cachedContentList(type: ContentType): Promise<ContentItem[] | undefined> {
+    const cached = await this.cacheManager.get<ContentItem[]>(CONTENT_LISTS[type].cacheKey);
+    if (cached) return cached;
+    this.getContentList(type).catch(() => undefined);
+    return undefined;
+  }
+
   getAllDubbedAnimes(): Promise<ContentItem[]> {
     return this.getContentList('dubbed');
   }

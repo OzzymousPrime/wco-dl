@@ -91,21 +91,32 @@
     } catch (e) { toast(`Not done: ${e.message}`); } finally { b.disabled = false; }
   });
 
-  async function load(refresh) {
+  // The server answers at once from what it has. While it fetches the rest behind (a newer timetable, wcostream's
+  // lists, each followed show's latest episode) it says so in a header (X-Calendar-Refreshing: 1): the calendar is
+  // then asked for again every 3 seconds, for a minute at most, quietly, and redrawn only if something changed.
+  let againT = null, againUntil = 0;
+  async function load(refresh, quiet) {
+    clearTimeout(againT);
+    let more = false;
     try {
       const url = '/dub-calendar' + (refresh ? '?refresh=1' : '');
-      const r = await window.wcoBusy(url, fetch(url));
+      const r = await (quiet ? fetch(url) : window.wcoBusy(url, fetch(url)));
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message ? [].concat(d.message).join('; ') : `The server answered ${r.status}`);
       if (d.needsToken) {
         status('No AnimeSchedule token yet. Make an application at animeschedule.net (account settings, API tab) and paste its token in Settings, the cog at the top right.');
         return;
       }
+      more = r.headers.get('X-Calendar-Refreshing') === '1';
+      const same = quiet && data && JSON.stringify(d) === JSON.stringify(data);
       data = d;
       $('cal').hidden = false;
       status((d.errors || []).length ? `Some weeks could not be read, so dates may be missing or a day old: ${d.errors.join('; ')}.` : '', true);
-      render();
-    } catch (e) { status(`The calendar could not be read: ${e.message}`, true); }
+      if (!same) render();
+    } catch (e) { if (!quiet) status(`The calendar could not be read: ${e.message}`, true); }
+    if (more && !againUntil) againUntil = Date.now() + 60000;
+    if (more && Date.now() < againUntil) againT = setTimeout(() => load(false, true), 3000);
+    else againUntil = 0;
   }
 
   for (const [id, set] of [['scope', (v) => { scope = v; }], ['dates', (v) => { dates = v; }]]) {

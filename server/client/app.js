@@ -511,12 +511,14 @@ async function sonarrImport() {
 
 // Download status panel
 const DOWNLOAD_STATUS_LABELS = {
+  queued: 'Waiting',
   running: 'Downloading',
   completed: 'Done',
   failed: 'Failed',
   timed_out: 'Timed out'
 };
 const DOWNLOAD_STATUS_ICONS = {
+  queued: '🕒',
   running: '⏳',
   completed: '✅',
   failed: '❌',
@@ -537,7 +539,7 @@ async function refreshDownloads() {
   }
 
   renderDownloads(jobs);
-  if (jobs.some(job => job.status === 'running')) {
+  if (jobs.some(job => job.status === 'running' || job.status === 'queued')) {
     downloadsTimer = setTimeout(refreshDownloads, 5000);
   }
 }
@@ -588,6 +590,8 @@ function renderDownloads(jobs) {
 function downloadDetail(job) {
   const lastLog = job.log[job.log.length - 1];
   switch (job.status) {
+    case 'queued':
+      return { kind: 'log', text: 'Starts when a running download finishes' };
     case 'running':
       return lastLog ? { kind: 'log', text: lastLog } : { kind: 'log', text: 'Starting...' };
     case 'completed':

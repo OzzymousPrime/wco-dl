@@ -22,6 +22,8 @@ export interface AppConfig {
   pythonBin: string;
   pythonScript: string;
   downloadIdleTimeoutMs: number;
+  /** Downloads from the Browse page that run at once; the rest wait their turn (MAX_PARALLEL_DOWNLOADS, default 3). */
+  maxParallelDownloads: number;
   puid: string | undefined;
   pgid: string | undefined;
   webhookUrls: string[];
@@ -60,6 +62,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     pythonScript: path.resolve(__dirname, '../../__main__.py'),
     // Must outlast a Byparr challenge solve (up to BYPARR_MAX_TIMEOUT_MS) plus retries.
     downloadIdleTimeoutMs: toInt(env.DOWNLOAD_IDLE_TIMEOUT_MS, 210000),
+    // Each downloader asks wcostream, and often Cloudflare, for pages of its own: a batch of 50 started together
+    // looks like an attack and gets the address blocked. Three at a time keeps a batch moving without that.
+    maxParallelDownloads: Math.min(toInt(env.MAX_PARALLEL_DOWNLOADS, 3), 20),
     puid: env.PUID || undefined,
     pgid: env.PGID || undefined,
     webhookUrls: (env.WEBHOOK_URLS || '')

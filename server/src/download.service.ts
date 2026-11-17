@@ -26,7 +26,8 @@ import {
 const execFileAsync = promisify(execFile);
 
 export type DownloadKind = 'show' | 'episode';
-export type DownloadStatus = 'running' | 'completed' | 'failed' | 'timed_out';
+/** queued: waiting for one of the running downloads to finish (at most MAX_PARALLEL_DOWNLOADS run at once). */
+export type DownloadStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timed_out';
 
 export interface StepResult {
   status: 'ok' | 'skipped' | 'failed';
@@ -141,6 +142,9 @@ export class DownloadService {
   private readonly logger = new Logger(DownloadService.name);
   private readonly jobs = new Map<string, DownloadJob>();
   private readonly webhooks = new Set<string>();
+  /** Jobs waiting for a free place, oldest first, with the arguments to start them with. */
+  private readonly waiting: { job: DownloadJob; fullArgs: string[] }[] = [];
+  private active = 0;
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {
     for (const url of config.webhookUrls ?? []) {
@@ -286,10 +290,7 @@ export class DownloadService {
     args: string[],
     options: JobOptions = {},
   ): Promise<DownloadJob> {
-    const { pythonBin, pythonScript, downloadIdleTimeoutMs } = this.config;
-    const fullArgs = [pythonScript, ...args];
-    this.logger.log(`Starting: ${pythonBin} ${fullArgs.join(' ')}`);
-
+    const fullArgs = [this.config.pythonScript, ...args];
     const job: DownloadJob = {
       id: randomUUID(),
       kind,
@@ -297,10 +298,40 @@ export class DownloadService {
       url,
       ...options,
       outputFolder,
-      status: 'running',
+      status: 'queued',
       startedAt: new Date().toISOString(),
       log: [],
     };
+
+    if (this.active >= Math.max(1, this.config.maxParallelDownloads ?? 3)) {
+      this.logger.log(`Queued: ${name} (${this.active} downloads running)`);
+      this.waiting.push({ job, fullArgs });
+      this.trackJob(job);
+      return job;
+    }
+    await this.launch(job, fullArgs);
+    return job;
+  }
+
+  /** Start the oldest waiting job while there is room. One that cannot start fails on its own, not the others. */
+  private startWaiting() {
+    while (this.waiting.length && this.active < Math.max(1, this.config.maxParallelDownloads ?? 3)) {
+      const { job, fullArgs } = this.waiting.shift()!;
+      this.launch(job, fullArgs).catch((error) => {
+        job.status = 'failed';
+        job.error = error.message;
+        job.finishedAt = new Date().toISOString();
+        void this.notifyWebhooks(job);
+      });
+    }
+  }
+
+  private async launch(job: DownloadJob, fullArgs: string[]): Promise<void> {
+    const { pythonBin, downloadIdleTimeoutMs } = this.config;
+    this.logger.log(`Starting: ${pythonBin} ${fullArgs.join(' ')}`);
+    job.status = 'running';
+    job.startedAt = new Date().toISOString();
+    this.active++;
 
     let running;
     try {
@@ -317,6 +348,7 @@ export class DownloadService {
         },
       });
     } catch (error) {
+      this.active--;
       this.logger.error(`Could not start ${pythonBin}: ${error.message}`);
       throw new InternalServerErrorException(
         `Could not start the downloader (${pythonBin}): ${error.message}`,
@@ -324,8 +356,12 @@ export class DownloadService {
     }
 
     this.trackJob(job);
-    running.result.then((result) => this.finishJob(job, result));
-    return job;
+    running.result.then((result) => {
+      // The place is freed as soon as the downloader stops; importing into Sonarr afterwards does not hold it.
+      this.active--;
+      this.startWaiting();
+      return this.finishJob(job, result);
+    });
   }
 
   private async finishJob(job: DownloadJob, result: ProcessResult) {
@@ -472,7 +508,7 @@ export class DownloadService {
     this.jobs.set(job.id, job);
     if (this.jobs.size <= MAX_TRACKED_JOBS) return;
     for (const [id, existing] of this.jobs) {
-      if (existing.status !== 'running') {
+      if (existing.status !== 'running' && existing.status !== 'queued') {
         this.jobs.delete(id);
         if (this.jobs.size <= MAX_TRACKED_JOBS) return;
       }

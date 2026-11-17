@@ -234,6 +234,23 @@ describe('DownloadService batch downloads', () => {
     expect(service.listJobs()).toHaveLength(2);
   });
 
+  it('runs at most MAX_PARALLEL_DOWNLOADS at once and starts the rest as places free up', async () => {
+    const service = createService({ maxParallelDownloads: 2 });
+    let most = 0;
+    const watch = setInterval(() => { most = Math.max(most, (service as any).active); }, 2);
+    try {
+      const jobs = await service.startBatchDownload({ names: ['naruto', 'bleach', 'one-piece', 'fail-me', 'monster'] });
+      expect(jobs.map((job) => job.status)).toEqual(['running', 'running', 'queued', 'queued', 'queued']);
+      const finished = [];
+      for (const job of jobs) finished.push((await waitForFinish(service, job)).status);
+      expect(finished).toEqual(['completed', 'completed', 'completed', 'failed', 'completed']);
+      expect(most).toBeLessThanOrEqual(2);
+      expect((service as any).active).toBe(0);
+    } finally {
+      clearInterval(watch);
+    }
+  });
+
   it('starts nothing when any name is invalid', async () => {
     const service = createService();
     await expect(

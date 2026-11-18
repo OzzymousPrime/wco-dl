@@ -1446,7 +1446,8 @@ export class FillService implements OnApplicationBootstrap {
         const dir = path.join(root, show.name, e.name), st = await dirStats(dir);
         all.files += st.files; all.bytes += st.bytes;
         if (busy.has(dir) || now - (st.newest || 0) < STAGE_OLD_DAYS * 86400000) continue;
-        old.folders++; old.files += st.files; old.bytes += st.bytes; dirs.push(dir);
+        dirs.push(dir);                       // an empty folder goes with the old ones, but is no download to mention
+        if (st.files) { old.folders++; old.files += st.files; old.bytes += st.bytes; }
       }
     }
     return { ...all, days: STAGE_OLD_DAYS, old, dirs };
@@ -1459,7 +1460,7 @@ export class FillService implements OnApplicationBootstrap {
     for (const dir of s.dirs) {
       if (this.busyStageDirs().has(dir)) continue;
       const st = await dirStats(dir);
-      try { await fs.rm(dir, { recursive: true, force: true }); folders++; bytes += st.bytes; } catch { /* in use: left */ }
+      try { await fs.rm(dir, { recursive: true, force: true }); if (st.files) folders++; bytes += st.bytes; } catch { /* in use: left */ }
       await fs.rmdir(path.dirname(dir)).catch(() => undefined);     // only when the show's folder is now empty
     }
     this.logger.log(`Staging: deleted ${folders} old download folder(s), ${gb(bytes)}`);

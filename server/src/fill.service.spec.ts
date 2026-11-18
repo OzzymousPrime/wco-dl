@@ -397,8 +397,8 @@ describe('FillService worker', () => {
 
   it('counts old downloads in staging and deletes only those', async () => {
     const stage = path.join(dir, 'out', 'wco-gaps', 're-zero-dub');
-    const old = path.join(stage, 'S02E14'), fresh = path.join(stage, 'S02E15');
-    await fs.mkdir(old, { recursive: true }); await fs.mkdir(fresh, { recursive: true });
+    const old = path.join(stage, 'S02E14'), fresh = path.join(stage, 'S02E15'), empty = path.join(stage, 'S02E16');
+    await fs.mkdir(old, { recursive: true }); await fs.mkdir(fresh, { recursive: true }); await fs.mkdir(empty, { recursive: true });
     await fs.writeFile(path.join(old, 'Re Zero-S02E14.mp4'), 'x'.repeat(1000));
     await fs.writeFile(path.join(old, 'downloader.log'), 'log');
     await fs.writeFile(path.join(fresh, 'Re Zero-S02E15.mp4'), 'x'.repeat(500));

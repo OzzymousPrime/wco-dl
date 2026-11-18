@@ -197,11 +197,28 @@
     const go = (href) => { location.href = href; };
     const openShow = (slug, lang) => (UI.hooks.openShow ? UI.hooks.openShow(slug, lang) : go('/map.html?url=' + encodeURIComponent(slug)));
     const search = (q) => (UI.hooks.search ? UI.hooks.search(q) : go('/map.html?find=' + encodeURIComponent(q)));
+    const openLink = (u) => (UI.hooks.link || ((v) => go('/map.html?url=' + encodeURIComponent(v))))(u);
+    // A link in the box (18 Nov 2026): one row saying what it opens, read from the address alone, so a typed or dropped
+    // link is checked before Enter. A show's page opens its map; an episode's page opens its show's map at that episode.
+    const linkItem = (q) => {
+      const no = (title) => ({ group: 'link', title, pic: icon('alert'), run: null });
+      let u; try { u = new URL(q); } catch { return no('That is not a whole link'); }
+      if (!/(^|\.)wcostream\.[a-z]+$/i.test(u.hostname)) return no('Only wcostream links can be opened');
+      const parts = u.pathname.split('/').filter(Boolean), i = parts.indexOf('anime');
+      let name = (i >= 0 ? parts[i + 1] : parts[parts.length - 1]) || '';
+      try { name = decodeURIComponent(name); } catch { /* keep it as written */ }
+      if (!name) return no('No show in that link');
+      const words = (x) => x.replace(/-+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase());
+      const ep = i < 0 ? /^(.+?)-(?:season-(\d+)-)?episode-(\d+)(?:-|$)/i.exec(name) : null;
+      const lang = /-english-subbed$/i.test(name) || u.searchParams.get('lang') === 'sub' ? ' (sub)' : /-english-dubbed$/i.test(name) || u.searchParams.get('lang') === 'dub' ? ' (dub)' : '';
+      const title = ep ? `Open ${words(ep[1])}, ${ep[2] ? `season ${ep[2]} ` : ''}episode ${ep[3]}${lang}` : `Open the map for ${words(name)}${lang}`;
+      return { group: 'link', title, pic: icon('chev'), run: () => openLink(q) };
+    };
     const getJSON = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(`The server answered ${r.status}`); return r.json(); };
     const postJSON = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); if (!r.ok) throw new Error(`The server answered ${r.status}`); return r.json().catch(() => ({})); };
 
     // Followed shows: asked for once, the first time the panel opens, and kept. The home page hands over its own copy.
-    let mine = null, asking = null, paused = null;
+    let mine = null, asking = null, paused = null, oldStage = 0, stageAt = 0;
     UI.setFollowed = (list) => { mine = list; };
     UI.setPaused = (p) => { paused = !!p; };
     const loadMine = () => (mine ? Promise.resolve(mine) : (asking = asking || getJSON('/followed').then((l) => { mine = mine || l; }, () => { mine = mine || []; })));
@@ -211,6 +228,9 @@
     const ACTIONS = [
       { id: 'pause', icon: () => (paused ? 'play' : 'pause'), title: () => (paused === null ? 'Pause or resume the queue' : paused ? 'Resume the queue' : 'Pause the queue'), words: 'pause resume the queue' },
       { id: 'retry', icon: () => 'retry', title: () => 'Retry everything that failed', words: 'retry everything that failed' },
+      { id: 'fillnow', icon: () => 'download', title: () => 'Fill the followed shows now', words: 'fill the followed shows now gaps run tonight plan' },
+      { id: 'recount', icon: () => 'retry', title: () => 'Check Sonarr for changes', words: 'check sonarr for changes recount count followed' },
+      { id: 'stage', icon: () => 'x', title: () => `Delete old downloads in staging (${oldStage})…`, words: 'delete old downloads in staging clear space', when: () => oldStage > 0 },
       { id: 'library', icon: () => 'chev', title: () => 'Open Library gaps', words: 'open library gaps' },
       { id: 'calendar', icon: () => 'chev', title: () => 'Open Dub calendar', words: 'open dub calendar' },
       { id: 'queue', icon: () => 'list', title: () => 'Open the queue', words: 'open the queue' },
@@ -231,6 +251,23 @@
         } catch (e) { UI.toast(`Could not retry: ${e.message}`); }
         if (UI.hooks.refresh) UI.hooks.refresh();
       },
+      // "Fill now" (18 Nov 2026): the overnight plan, made now, and its runs start straight away.
+      fillnow: async () => {
+        UI.toast('Looking at every followed show for what is due…');
+        try {
+          const runs = await postJSON('/fill/plan-now');
+          const eps = runs.reduce((a, j) => a + j.episodes.length, 0), plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+          UI.toast(eps ? `Queued ${plural(eps, 'episode')} from ${plural(runs.length, 'show')}${paused ? '. The queue is paused: press Resume to start' : ''}`
+            : 'Nothing to fill: the followed shows are complete, or their episodes wait for their next try');
+        } catch (e) { UI.toast(`Could not fill: ${e.message}`); }
+        if (UI.hooks.refresh) UI.hooks.refresh();
+      },
+      recount: async () => {
+        if (UI.hooks.recount) { UI.hooks.recount(); return; }
+        UI.toast('Counting every followed show in Sonarr. This takes a minute.');
+        try { const r = await postJSON('/followed/recount'); mine = null; UI.toast(`Counted ${r.counted} shows`); } catch (e) { UI.toast(`Could not count: ${e.message}`); }
+      },
+      stage: () => (UI.hooks.stage ? UI.hooks.stage() : go('/map.html#stage')),
       library: () => go('/library.html'),
       calendar: () => go('/calendar.html'),
       queue: () => (UI.hooks.queue ? UI.hooks.queue() : go('/map.html#queue')),
@@ -245,7 +282,7 @@
     };
     const draw = () => {
       let n = -1;
-      const html = [['shows', 'Shows'], ['actions', 'Actions'], ['wco', 'On wcostream']].map(([g, label]) => {
+      const html = [['link', 'Link'], ['shows', 'Shows'], ['actions', 'Actions'], ['wco', 'On wcostream']].map(([g, label]) => {
         const list = sug.items.filter((x) => x.group === g);
         return list.length ? `<div role="group" aria-label="${label}"><div class="sgroup" aria-hidden="true">${label}</div>` + list.map((x) => {
           n++;
@@ -266,7 +303,8 @@
         .sort((a, b) => (q ? Number(starts(name(b))) - Number(starts(name(a))) : rank(a) - rank(b)) || name(a).localeCompare(name(b), 'en', { sensitivity: 'base' })).slice(0, 6)
         .map((x) => ({ group: 'shows', title: name(x), pic: UI.poster(x.seriesId, name(x), 'xs'),
           meta: [x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ') || (x.countedAt ? 'complete' : ''), run: () => openShow(x.slug) }));
-      const actions = ACTIONS.filter((a) => !q || has(a.words)).map((a) => ({ group: 'actions', title: a.title(), pic: icon(a.icon()), run: act[a.id] }));
+      const here = (UI.hooks.actions ? UI.hooks.actions() : []).filter((a) => !q || has(a.words)).map((a) => ({ group: 'actions', title: a.title, pic: icon(a.icon), run: a.run }));
+      const actions = [...here, ...ACTIONS.filter((a) => (!a.when || a.when()) && (!q || has(a.words))).map((a) => ({ group: 'actions', title: a.title(), pic: icon(a.icon()), run: act[a.id] }))];
       if (q) actions.push({ group: 'actions', title: `Search wcostream for "${q}"`, pic: icon('search'), run: () => search(q) });
       return { shows, actions, have: new Set((mine || []).filter((x) => has(name(x))).map((x) => x.slug)), starts };
     };
@@ -274,11 +312,15 @@
       const q = sug.q = box.value.trim();
       clear.hidden = !q; key.hidden = !!q;
       clearTimeout(sug.timer); const my = ++sug.seq;
-      if (isLink(q)) { close(); return; }
+      if (isLink(q)) { sug.items = [linkItem(q)]; sug.loading = false; sug.active = 0; draw(); return; }
       const first = build();
       sug.items = [...first.shows, ...first.actions]; sug.loading = q.length >= 2; sug.active = q && sug.items.length ? 0 : -1;
       draw();
       if (!mine) loadMine().then(() => { if (my === sug.seq && document.activeElement === box) suggest(); });
+      if (Date.now() - stageAt > 60000) {               // old staging: offered as an action only when there is some
+        stageAt = Date.now();
+        getJSON('/fill/staging').then((st) => { oldStage = st?.old?.folders ?? 0; if (my === sug.seq && !panel.hidden && !isLink(sug.q)) { const b = build(); sug.items = [...b.shows, ...b.actions, ...sug.items.filter((x) => x.group === 'wco')]; draw(); } }, () => undefined);
+      }
       if (paused === null) getJSON('/fill/state').then((s) => { paused = !!s.paused; if (my === sug.seq && !panel.hidden) { const b = build(); sug.items = [...b.shows, ...b.actions, ...sug.items.filter((x) => x.group === 'wco')]; draw(); } }, () => undefined);   // the pause action now names what it will do
       if (q.length < 2) return;
       sug.timer = setTimeout(async () => {
@@ -293,11 +335,11 @@
         draw();
       }, 220);
     }
-    const choose = (x) => { if (!x) return; close(); box.value = ''; clear.hidden = true; key.hidden = false; box.blur(); x.run(); };
+    const choose = (x) => { if (!x || !x.run) return; close(); box.value = ''; clear.hidden = true; key.hidden = false; box.blur(); x.run(); };
     box.addEventListener('input', suggest);
     box.addEventListener('focus', suggest);
     box.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== box) close(); }, 120));   // not if the box was reached again meanwhile
-    box.addEventListener('paste', () => setTimeout(() => { if (isLink(box.value)) { const v = box.value.trim(); close(); box.value = ''; clear.hidden = true; key.hidden = false; (UI.hooks.link || ((u) => go('/map.html?url=' + encodeURIComponent(u))))(v); } }, 0));
+    box.addEventListener('paste', () => setTimeout(() => { const v = box.value.trim(); if (isLink(v) && linkItem(v).run) { close(); box.value = ''; clear.hidden = true; key.hidden = false; openLink(v); } }, 0));
     box.addEventListener('keydown', (ev) => {
       const open = !panel.hidden, n = sug.items.length;
       if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
@@ -325,7 +367,7 @@
       ev.preventDefault();
       const q = box.value.trim(); if (!q) return;
       close();
-      if (isLink(q)) (UI.hooks.link || ((u) => go('/map.html?url=' + encodeURIComponent(u))))(q); else search(q);
+      if (isLink(q)) { const x = linkItem(q); if (x.run) x.run(); else suggest(); } else search(q);
     });
   }
 

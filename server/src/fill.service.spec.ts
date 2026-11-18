@@ -412,6 +412,50 @@ describe('FillService worker', () => {
     expect((await service.staging()).old.folders).toBe(0);
   });
 
+  it('"Fill now" plans runs that start at any hour, while overnight runs wait for the night', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { mayRun, isNight } = require('./fill.service');
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    await svc.setPaused(true);                                        // planned, not downloaded
+    const made = await svc.nightlyPlan({ now: true });
+    expect(made.length).toBeGreaterThan(0);
+    for (const j of made) { expect(j).toMatchObject({ auto: true, now: true }); expect(mayRun(j)).toBe(true); }
+    expect(mayRun({ ...made[0], now: undefined })).toBe(isNight());
+    expect(mayRun({ ...made[0], auto: false, now: undefined })).toBe(true);
+  });
+
+  it('keeps the summary of the automatic runs, sends only an overnight one, and never counts a run twice', async () => {
+    const svc = new FillService((service as any).config);
+    const push = jest.fn().mockResolvedValue(undefined);
+    Object.assign(svc as any, { push, attention: async () => [], staging: async () => ({ old: { files: 0 } }), checkDisk: async () => ({ low: false }) });
+    const ep = (id: number, state: string, mode = 'missing') => ({ id, s: 1, e: id, title: 'x', mode, state });
+    const job = (id: string, seriesId: number, title: string, createdAt: string, episodes: any[], now?: boolean) =>
+      ({ id, seriesId, title, slug: title.toLowerCase(), quality: '1080', absolute: false, createdAt, auto: true, now, episodes });
+    const hourAgo = new Date(Date.now() - 3600000).toISOString();
+    (svc as any).jobs = [
+      job('a', 1, 'Bravo', hourAgo, [ep(1, 'done'), ep(2, 'failed')], true),
+      job('b', 2, 'alpha', hourAgo, [ep(3, 'done', 'swap'), ep(4, 'cancelled')], true),
+      job('z', 9, 'Old', new Date(Date.now() - 30 * 3600000).toISOString(), [ep(9, 'done')]),   // over 20 hours ago
+    ];
+    await (svc as any).notifyNight();
+    const first = (await svc.getLastRun())!;
+    expect(first).toMatchObject({ kind: 'now', tally: { filled: 1, swapped: 1, failed: 1, premium: 0, kept: 0 }, attention: 0 });
+    expect(first.shows.map((s) => [s.title, s.slug, s.filled + s.swapped, s.failed])).toEqual([['alpha', 'alpha', 1, 0], ['Bravo', 'bravo', 1, 1]]);
+    expect(push).not.toHaveBeenCalled();                              // "Fill now": the person is looking at the screen
+
+    await (svc as any).notifyNight();                                 // nothing new since: nothing written, nothing sent
+    expect((await svc.getLastRun())!.at).toBe(first.at);
+
+    (svc as any).jobs.push(job('c', 3, 'Charlie', new Date(Date.now() + 1000).toISOString(), [ep(5, 'premium')]));
+    await (svc as any).notifyNight();
+    expect(await svc.getLastRun()).toMatchObject({ kind: 'night', tally: { premium: 1, filled: 0, swapped: 0 } });
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push.mock.calls[0][0]).toBe('wco-dl overnight');
+    expect(push.mock.calls[0][1]).toMatch(/^Overnight: 0 filled, 0 swapped to dub, 1 premium to Sonarr/);
+    expect((await new FillService((service as any).config).getLastRun())!.kind).toBe('night');   // kept over a restart
+  });
+
   it('a parked overnight run names the next night, not a time outside the window', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { brakeMessage } = require('./fill.service');

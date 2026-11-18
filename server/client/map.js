@@ -81,6 +81,8 @@
   function toHash(hash) {
     if (hash === '#queue') openQueue(true);
     else if (hash === '#attention' && !$('attention').hidden) $('attention').scrollIntoView({ block: 'start' });
+    else if (hash === '#night') showNight();
+    else if (hash === '#stage' && !$('stage').hidden) { stageAsk = true; renderStage(); $('stage').scrollIntoView({ block: 'center' }); $('stage').querySelector('button')?.focus({ preventScroll: true }); }
   }
   function goHome(o = {}) {
     if (view === 'home') {
@@ -162,6 +164,14 @@
   UI.hooks.search = (words) => nameSearch(words);
   UI.hooks.queue = () => openQueue(true);
   UI.hooks.refresh = () => { lastQ = null; loadAttention(true); poll(); };
+  UI.hooks.recount = () => $('recount').click();
+  UI.hooks.stage = () => (view === 'home' ? toHash('#stage') : goHome({ hash: '#stage' }));
+  // What the search box offers for the screen in view (18 Nov 2026): on a show's map, follow it or stop.
+  UI.hooks.actions = () => {
+    if (view !== 'show' || !show?.series) return [];
+    const on = $('follow').getAttribute('aria-pressed') === 'true';
+    return [{ icon: 'check', title: on ? 'Stop following this show' : 'Follow this show overnight', words: 'follow unfollow stop following this show overnight', run: () => $('follow').click() }];
+  };
 
   // ---------- Motion: small, quick, and off when the system asks for less ----------
   // A panel that appears rises a few pixels; a progress bar slides from where it was instead of jumping.
@@ -560,14 +570,17 @@
   const when = (s) => new Date(s).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const prog = (p, label, text) => `<div class="prog" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"${text ? ` aria-valuetext="${esc(text)}"` : ''}><i style="width:${p}%"></i></div>`;
   let allRuns = [], queueErr = '', pollT = null, pollSeq = 0;
-  let qstate = { paused: false }, attention = [], attnAt = 0, attnAt0 = false, stage = null, stageAsk = false;
+  let qstate = { paused: false }, attention = [], attnAt = 0, attnAt0 = false, stage = null, stageAsk = false, lastRun = null, nightAt0 = false;
   async function loadAttention(force) {
     if (!force && Date.now() - attnAt < 60000) return;   // it asks Sonarr, so not on every poll
     attnAt = Date.now();
-    [attention, stage] = await Promise.all([api('GET', '/attention').catch(() => attention), api('GET', '/fill/staging').catch(() => stage)]);
+    [attention, stage, lastRun] = await Promise.all([api('GET', '/attention').catch(() => attention), api('GET', '/fill/staging').catch(() => stage),
+      api('GET', '/fill/last-run').catch(() => lastRun)]);
     UI.setCounts({ attention: attnShown().length });
     renderHome();
     if (location.hash === '#attention' && !attnAt0) { attnAt0 = true; $('attention').scrollIntoView({ block: 'start' }); }
+    if (location.hash === '#night' && !nightAt0) { nightAt0 = true; showNight(); }
+    if (location.hash === '#stage' && !nightAt0) { nightAt0 = true; toHash('#stage'); }
   }
 
   function scope() {
@@ -845,7 +858,7 @@
     for (const j of allRuns) for (const e of j.episodes) if (ACTIVE.includes(e.state)) {
       const a = act.get(j.seriesId) || { n: 0, cur: null }; a.n++; if (isWorking(e)) a.cur = e; act.set(j.seriesId, a);
     }
-    renderAttention(); renderStage();
+    renderAttention(); renderStage(); renderNight();
     if (!followedLoaded) return;                       // the still grey rows stay until the first answer
     $('followedlist').removeAttribute('aria-busy');
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
@@ -926,6 +939,34 @@
     $('stage').hidden = false;
     if ($('stage').dataset.h !== html) { $('stage').dataset.h = html; $('stage').innerHTML = html; }
   }
+  // Last night (18 Nov 2026): what the automatic runs did, as the phone message said it, with a link to each show.
+  // Shown for a day and a half after the runs finished; the phone message links here (#night) and opens it.
+  function renderNight() {
+    const r = lastRun;
+    if (!r?.at || Date.now() - new Date(r.at).getTime() > 36 * 3600000) { $('night').hidden = true; return; }
+    const t = r.tally, n = (k, word) => (t[k] ? `${t[k]} ${word}` : '');
+    const said = [n('filled', 'filled'), n('swapped', 'swapped to dub'), n('premium', 'handed to Sonarr'), n('kept', 'to check'), n('failed', 'failed')].filter(Boolean);
+    const hm = (s) => new Date(s).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const today = new Date(r.at).toDateString() === new Date().toDateString();
+    const head = r.kind === 'now' ? 'Fill now' : today ? 'Last night' : 'Overnight, ' + new Date(r.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    const extra = r.shows.length + r.notes.length;
+    const sum = `<b>${esc(head)}</b><span class="meta">${hm(r.from)} to ${hm(r.at)}</span><span class="what">${said.length ? esc(said.join(', ')) : 'Nothing new came in'}</span>` +
+      (extra ? `<span class="more">${r.shows.length ? `${r.shows.length} show${r.shows.length === 1 ? '' : 's'}` : 'Notes'}${UI.icon('chev')}</span>` : '');
+    const word = (x) => [x.filled && `${x.filled} filled`, x.swapped && `${x.swapped} swapped`, x.premium && `${x.premium} to Sonarr`, x.kept && `${x.kept} to check`, x.failed && `<span class="gapmark">${x.failed} failed</span>`].filter(Boolean).join(' · ');
+    const body = (r.shows.length ? `<ul class="flist">${r.shows.map((x) => `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}">${UI.poster(x.seriesId, x.title)}` +
+      `<span class="ft"><span class="fname">${esc(x.title)}</span><span class="fmeta">${word(x)}</span></span></a></li>`).join('')}</ul>` : '') +
+      (r.notes.length ? `<ul class="notes">${r.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
+    $('night').hidden = false;
+    $('nightsum').tabIndex = extra ? 0 : -1;
+    if ($('night').dataset.h !== sum + body) { $('night').dataset.h = sum + body; $('nightsum').innerHTML = sum; $('nightbody').innerHTML = body; }
+  }
+  $('nightsum').addEventListener('click', (ev) => { if ($('nightsum').tabIndex < 0) ev.preventDefault(); });   // nothing to open
+  function showNight() {
+    if ($('night').hidden) return;
+    $('night').open = true;
+    $('night').scrollIntoView({ block: 'start', behavior: reduce.matches ? 'auto' : 'smooth' });
+  }
+
   $('stage').addEventListener('click', async (ev) => {
     const b = ev.target.closest('[data-s]'); if (!b) return;
     if (b.dataset.s !== 'yes') { stageAsk = b.dataset.s === 'ask'; renderStage(); $('stage').querySelector('button')?.focus(); return; }

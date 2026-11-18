@@ -81,8 +81,39 @@ export interface FillJob {
   quality: string; absolute: boolean; createdAt: string; finishedAt?: string; episodes: FillEpisode[];
   /** Queued by the nightly plan for a followed show: runs only in the night window. */
   auto?: boolean;
+  /** Planned by "Fill now" (18 Nov 2026): an automatic run that starts straight away instead of waiting for the night. */
+  now?: boolean;
   /** Episodes in a row that wcostream's video server refused (see VIDEO_REFUSED). */
   refused?: number;
+}
+
+/** What a set of automatic runs did, in all and per show. */
+export interface RunTally { filled: number; swapped: number; premium: number; kept: number; failed: number }
+/**
+ * The summary of the last automatic runs (18 Nov 2026), kept for the home screen's "Last night" card, because the
+ * phone message is gone once it is swiped away. `kind` is 'now' when every run in it came from "Fill now".
+ */
+export interface LastRun {
+  at: string; from: string; kind: 'night' | 'now'; tally: RunTally;
+  shows: ({ slug: string; title: string; seriesId: number } & RunTally)[];
+  notes: string[]; attention: number;
+}
+/** Count what runs did, in all and per show (a show with two runs is one row), shows by name. */
+export function tallyRuns(runs: FillJob[]): { tally: RunTally; shows: LastRun['shows'] } {
+  const zero = (): RunTally => ({ filled: 0, swapped: 0, premium: 0, kept: 0, failed: 0 });
+  const tally = zero(), by = new Map<number, LastRun['shows'][number]>();
+  for (const j of runs) {
+    const row = by.get(j.seriesId) ?? { slug: j.slug, title: j.title, seriesId: j.seriesId, ...zero() };
+    for (const e of j.episodes) {
+      const k: keyof RunTally | undefined = e.state === 'done' ? (e.mode === 'swap' ? 'swapped' : 'filled')
+        : e.state === 'premium' ? 'premium' : e.state === 'kept' ? 'kept' : e.state === 'failed' ? 'failed' : undefined;
+      if (k) { row[k]++; tally[k]++; }
+    }
+    by.set(j.seriesId, row);
+  }
+  const shows = [...by.values()].filter((r) => r.filled + r.swapped + r.premium + r.kept + r.failed > 0)
+    .sort((a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }));
+  return { tally, shows };
 }
 
 interface ShowPref {
@@ -115,6 +146,8 @@ export function isNight(d = new Date()): boolean {
   const h = d.getHours();
   return NIGHT.from < NIGHT.to ? h >= NIGHT.from && h < NIGHT.to : h >= NIGHT.from || h < NIGHT.to;
 }
+/** A run may start now: one a person queued, one "Fill now" planned, or an overnight one inside the night window. */
+export const mayRun = (j: FillJob) => !j.auto || !!j.now || isNight();
 /** The settings a request may set, checked. Unknown or bad values are ignored, so the file can never hold nonsense. */
 export function cleanSettings(body: any): Partial<{ nightFrom: number; nightTo: number; nightBudget: number; quality: '1080' | '480' }> {
   const out: any = {};
@@ -626,7 +659,7 @@ export class FillService implements OnApplicationBootstrap {
     return new Set(this.jobs.flatMap((j) => j.episodes.filter((e) => ['queued', 'downloading', 'importing'].includes(e.state)).map((e) => e.id)));
   }
 
-  async createJob(body: { seriesId?: number; slug?: string; language?: string; quality?: string; absolute?: boolean; episodeIds?: number[]; auto?: boolean }) {
+  async createJob(body: { seriesId?: number; slug?: string; language?: string; quality?: string; absolute?: boolean; episodeIds?: number[]; auto?: boolean; now?: boolean }) {
     const seriesId = Number(body?.seriesId);
     const ids = Array.isArray(body?.episodeIds) ? body.episodeIds.map(Number).filter(Number.isFinite) : [];
     if (!seriesId || !ids.length) throw new BadRequestException('Pick a show and at least one episode');
@@ -644,7 +677,7 @@ export class FillService implements OnApplicationBootstrap {
     const picked = needed.filter((e) => !busy.has(e.id));
     if (!picked.length) throw new ConflictException('Those episodes are already in the queue');
     const job: FillJob = {
-      id: randomUUID(), seriesId, title: series.title, slug, language, quality, absolute: !!body.absolute, auto: !!body.auto,
+      id: randomUUID(), seriesId, title: series.title, slug, language, quality, absolute: !!body.absolute, auto: !!body.auto, ...(body.auto && body.now ? { now: true } : {}),
       createdAt: new Date().toISOString(),
       episodes: picked.map((e) => ({ id: e.id, s: e.s, e: e.e, abs: e.abs, title: e.t,
         mode: e.st === 'missing' ? 'missing' : 'swap', state: 'queued' })),
@@ -689,7 +722,7 @@ export class FillService implements OnApplicationBootstrap {
     const busy = this.activeIds();
     let any = false;
     for (const job of this.jobs) {
-      if (new Date(job.createdAt).getTime() < since || (job.auto && !isNight())) continue;
+      if (new Date(job.createdAt).getTime() < since || !mayRun(job)) continue;
       for (const ep of job.episodes) {
         if (ep.state !== 'failed' || ep.autoRetried || ep.dismissed || busy.has(ep.id)) continue;
         // wcostream does not list this episode under this number: asking again changes nothing.
@@ -724,7 +757,7 @@ export class FillService implements OnApplicationBootstrap {
         const now = new Date().toISOString();
         const ready = (e: FillEpisode) => e.state === 'queued' && (!e.notBefore || e.notBefore <= now);
         if (this.paused) break;
-        const job = this.jobs.find((j) => (!j.auto || isNight()) && j.episodes.some(ready));
+        const job = this.jobs.find((j) => mayRun(j) && j.episodes.some(ready));
         if (!job) {
           if (this.requeueFailedOnce()) continue;
           this.scheduleWake(); break;
@@ -747,7 +780,7 @@ export class FillService implements OnApplicationBootstrap {
             const until = new Date(Date.now() + wait * 60000);
             for (const e of job.episodes) if (e.state === 'queued') {
               e.notBefore = until.toISOString();
-              e.message = brakeMessage(job.refused, until, !!job.auto);
+              e.message = brakeMessage(job.refused, until, !!job.auto && !job.now);
             }
             this.logger.warn(`${job.title}: ${job.refused} refusals in a row, waiting ${wait} minutes`);
           }
@@ -755,7 +788,7 @@ export class FillService implements OnApplicationBootstrap {
         if (!job.episodes.some((e) => e.state === 'queued')) {
           job.finishedAt = new Date().toISOString();
           if (job.auto && !this.jobs.some((j) => j.auto && j.episodes.some((e) => ['queued', 'downloading', 'importing'].includes(e.state)))) {
-            await this.notifyNight().catch((e) => this.logger.warn(`Summary push failed: ${(e as Error).message}`));
+            await this.notifyNight().catch((e) => this.logger.warn(`Summary failed: ${(e as Error).message}`));
           }
         }
         await this.save();
@@ -1092,13 +1125,17 @@ export class FillService implements OnApplicationBootstrap {
   @Cron('5 * * * *')
   async nightlyTick() { if (new Date().getHours() === NIGHT.from) await this.nightlyPlan(); }
 
-  private planning?: Promise<void>;
-  /** Queue what is due for each followed show. The runs start inside the night window. One plan at a time: a second call joins the one running. */
-  nightlyPlan(): Promise<void> {
-    return (this.planning ??= this.plan().finally(() => { this.planning = undefined; }));
+  private planning?: Promise<FillJob[]>;
+  /**
+   * Queue what is due for each followed show. The runs start inside the night window, or straight away with `now`
+   * ("Fill now", 18 Nov 2026). One plan at a time: a second call joins the one running and gets its runs.
+   */
+  nightlyPlan(opts: { now?: boolean } = {}): Promise<FillJob[]> {
+    return (this.planning ??= this.plan(!!opts.now).finally(() => { this.planning = undefined; }));
   }
 
-  private async plan() {
+  private async plan(now = false): Promise<FillJob[]> {
+    const made: FillJob[] = [];
     const prefs = await this.prefs();
     const busy = this.activeIds();
     let budget = SETTINGS.nightBudget;
@@ -1149,7 +1186,8 @@ export class FillService implements OnApplicationBootstrap {
       try {
         const tries = (pref.tries ??= {});
         const job = await this.createJob({ seriesId: pref.seriesId, slug, language: pref.language ?? 'dub',
-          absolute: pref.absolute, episodeIds: due.slice(0, Math.min(40, budget)), auto: true });
+          absolute: pref.absolute, episodeIds: due.slice(0, Math.min(40, budget)), auto: true, now });
+        made.push(job);
         budget -= job.episodes.length;
         pref.lastPlanned = new Date().toISOString();
         for (const e of job.episodes) tries[e.id] = { n: (tries[e.id]?.n ?? 0) + 1, last: new Date().toISOString() };
@@ -1171,6 +1209,7 @@ export class FillService implements OnApplicationBootstrap {
       }
     });
     void this.pump();
+    return made;
   }
 
   /**
@@ -1327,26 +1366,54 @@ export class FillService implements OnApplicationBootstrap {
 
   private nightNotes: string[] = [];
 
-  /** One summary POST to NOTIFY_URL (when set) once the night's automatic runs have finished. */
+  private get lastRunFile() { return path.join(this.configDir, 'last-run.json'); }
+  private lastRun?: LastRun | null;     // undefined: not read from disk yet
+
+  /** The summary of the last automatic runs, or null before the first. */
+  async getLastRun(): Promise<LastRun | null> {
+    if (this.lastRun === undefined) {
+      try { this.lastRun = JSON.parse(await fs.readFile(this.lastRunFile, 'utf8')) as LastRun; } catch { this.lastRun = null; }
+    }
+    return this.lastRun ?? null;
+  }
+
+  /**
+   * Once the automatic runs have finished: keep their summary for the home screen and, for an overnight one, send it
+   * to NOTIFY_URL (when set). It covers the runs made since the last summary (at most the last 20 hours), so a
+   * "Fill now" in the afternoon does not count last night again; with no new runs nothing is written or sent.
+   */
   private async notifyNight() {
     const { publicUrl } = this.config;
-    const since = Date.now() - 20 * 3600 * 1000;
+    const prev = await this.getLastRun();
+    const since = Math.max(Date.now() - 20 * 3600 * 1000, prev ? new Date(prev.at).getTime() : 0);
     const runs = this.jobs.filter((j) => j.auto && new Date(j.createdAt).getTime() > since);
-    const n = (st: string) => runs.reduce((a, j) => a + j.episodes.filter((e) => e.state === st).length, 0);
-    const swaps = runs.reduce((a, j) => a + j.episodes.filter((e) => e.state === 'done' && e.mode === 'swap').length, 0);
-    const shows = [...new Set(runs.filter((j) => j.episodes.some((e) => e.state === 'done')).map((j) => j.title))];
-    const body = `Overnight: ${n('done') - swaps} filled, ${swaps} swapped to dub, ${n('premium')} premium to Sonarr, ${n('kept')} to check, ${n('failed')} failed.` +
-      (shows.length ? `\nShows: ${shows.slice(0, 8).join(', ')}.` : '') +
-      (this.nightNotes.length ? '\n' + this.nightNotes.splice(0).slice(0, 5).join('\n') : '') +
-      (await this.attention().then((a) => (a.length ? `\n${a.length} need you: open the link.` : ''), () => ''));
+    if (!runs.length) return;
+    const { tally: t, shows } = tallyRuns(runs);
+    const notes = this.nightNotes.splice(0);
+    const attention = await this.attention().then((a) => a.length, () => 0);
+    const kind: LastRun['kind'] = runs.every((j) => j.now) ? 'now' : 'night';
+    const from = runs.map((j) => j.createdAt).sort()[0];
+    this.lastRun = { at: new Date().toISOString(), from, kind, tally: t, shows, notes: notes.slice(0, 30), attention };
+    try {
+      await fs.mkdir(this.configDir, { recursive: true });
+      const tmp = this.lastRunFile + '.tmp';
+      await fs.writeFile(tmp, JSON.stringify(this.lastRun, null, 2));
+      await fs.rename(tmp, this.lastRunFile);
+    } catch (e) { this.logger.warn(`Could not keep the run summary: ${(e as Error).message}`); }
+    const filledShows = shows.filter((r) => r.filled + r.swapped > 0).map((r) => r.title);
+    const body = `${kind === 'now' ? 'Filled now' : 'Overnight'}: ${t.filled} filled, ${t.swapped} swapped to dub, ${t.premium} premium to Sonarr, ${t.kept} to check, ${t.failed} failed.` +
+      (filledShows.length ? `\nShows: ${filledShows.slice(0, 8).join(', ')}.` : '') +
+      (notes.length ? '\n' + notes.slice(0, 5).join('\n') : '') +
+      (attention ? `\n${attention} need you: open the link.` : '');
+    this.logger.log(body.replace(/\n/g, ' | '));
+    if (kind === 'now') return;           // someone pressed the button, and the home screen shows the summary
     const disk = await this.checkDisk();
     const wco = this.wcoVerdict();
     if (!wco.ok) { this.wcoToldAt = Date.now(); this.wcoTold = true; this.wcoPending = false; }
     const stage = await this.staging().catch(() => undefined);
     const text = body + (disk.low ? `\n${lowDiskMessage(disk)}.` : '') + (wco.ok ? '' : `\nwcostream cannot be read: ${wco.why}. ${WCO_HELD}`) +
       (stage?.old.files ? `\n${stage.old.folders} downloads in staging untouched for ${STAGE_OLD_DAYS} days (${gb(stage.old.bytes)}): delete them on Needs you.` : '');
-    this.logger.log(text.replace(/\n/g, ' | '));
-    await this.push('wco-dl overnight', text, publicUrl ? `${publicUrl}/map.html#attention` : undefined);
+    await this.push('wco-dl overnight', text, publicUrl ? `${publicUrl}/map.html#night` : undefined);
   }
 
   /** One message to NOTIFY_URL (when set): {source, title, body, url}, with NOTIFY_TOKEN as x-notify-token. */

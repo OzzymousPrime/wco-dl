@@ -156,9 +156,15 @@ export class AppController {
 
   @Post('fill/plan-now')
   @UseGuards(JsonRequestGuard)
-  async planNow() {
-    await this.fillService.nightlyPlan();
-    return this.fillService.listJobs().filter((j) => j.auto && !j.finishedAt);
+  /** "Fill now" (18 Nov 2026): plan what is due for every followed show and start it straight away; answers the runs it made. */
+  planNow() {
+    return this.fillService.nightlyPlan({ now: true });
+  }
+
+  /** The summary of the last automatic runs, for the home screen's "Last night" card; {} before the first (a bare null sends no body). */
+  @Get('fill/last-run')
+  async lastRun() {
+    return (await this.fillService.getLastRun()) ?? {};
   }
 
   @Post('fill/jobs/:id/retry')

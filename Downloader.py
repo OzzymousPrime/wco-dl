@@ -12,7 +12,7 @@ def create_session():
 
 
 class Downloader(object):
-    def __init__(self, logger, download_url, backup_url, hidden_url, output, header, user_agent, show_info, settings, quiet, session=None):
+    def __init__(self, logger, download_url, backup_url, hidden_url, output, header, user_agent, show_info, settings, quiet, session=None, alternates=None):
         self.sess = session or create_session()
         self.failed = False
 
@@ -28,6 +28,9 @@ class Downloader(object):
         self.header = header
         self.output = output
         self.backup_url = backup_url
+        # Every other copy the page offers (other qualities, on the stream server and the CDN), tried in turn when the
+        # first is refused (18 Nov 2026: the backup was often the same server, so it failed the same way).
+        self.alternates = [u for u in (alternates if alternates is not None else [backup_url]) if u and u != download_url]
         self.hidden_url = hidden_url
         self.user_agent = user_agent
         self.logger = logger
@@ -53,21 +56,19 @@ class Downloader(object):
                 return 
         else:
             print('[wco-dl] - Downloading {0}'.format(self.file_name))
-            while True:
-                if not self.start_download(download_url):
-                    print('[wco-dl] - Trying to download using the backup URL...')
-                    if not self.start_download(self.backup_url):
-                        print(f'[wco-dl] - Download for {self.file_name} did not complete, '
-                            f'please create an issue on GitHub.\n')
-                        f_path = os.path.dirname(os.path.realpath(__file__)) + os.sep
-                        with open(f_path + "failed.txt", "a+") as failed: 
-                            failed.write("{0},{1},{2}".format(self.file_name, self.output, show_info[4]))
-                        self.failed = True
-                        break
-                    else:
-                        break
-                else:
+            ok = self.start_download(download_url)
+            for n, alternate in enumerate(self.alternates if not ok else [], 1):
+                print('[wco-dl] - Trying to download using the backup URL ({0} of {1})...'.format(n, len(self.alternates)))
+                if self.start_download(alternate):
+                    ok = True
                     break
+            if not ok:
+                print(f'[wco-dl] - Download for {self.file_name} did not complete, '
+                    f'please create an issue on GitHub.\n')
+                f_path = os.path.dirname(os.path.realpath(__file__)) + os.sep
+                with open(f_path + "failed.txt", "a+") as failed:
+                    failed.write("{0},{1},{2}".format(self.file_name, self.output, show_info[4]))
+                self.failed = True
 
     def check_if_downloaded(self, url):
         print('[wco-dl] - Checking if video is already downloaded, this may take some time, you can turn this off in your settings.')

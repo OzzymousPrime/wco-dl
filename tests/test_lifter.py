@@ -97,3 +97,34 @@ class PremiumSkipTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class InfoExtractorTest(unittest.TestCase):
+    """18 Nov 2026: links that end in the episode number were misnamed (episode 10 as 1 plus "0", episode 9 as 0)."""
+
+    def test_a_link_that_ends_in_the_number(self):
+        get = lifter_module.Lifter.info_extractor
+        self.assertEqual(get('https://www.wcostream.tv/happy-the-hoglet-episode-10')[1:4], ('Season 1', 'Episode 10', ''))
+        self.assertEqual(get('https://www.wcostream.tv/happy-the-hoglet-episode-9/')[1:4], ('Season 1', 'Episode 9', ''))
+        self.assertEqual(get('https://www.wcostream.tv/some-show-season-2-episode-10')[1:4], ('Season 2', 'Episode 10', ''))
+
+    def test_links_with_a_title_read_as_before(self):
+        get = lifter_module.Lifter.info_extractor
+        self.assertEqual(get('https://www.wcostream.tv/happy-the-hoglet-episode-10-happy-butterfly')[:4],
+                         ('Happy The Hoglet', 'Season 1', 'Episode 10', 'Happy Butterfly'))
+        self.assertEqual(get('https://www.wcostream.tv/some-show-season-2-episode-5-english-dubbed')[:4],
+                         ('Some Show', 'Season 2', 'Episode 5', 'English Dubbed'))
+
+
+class AlternateUrlsTest(unittest.TestCase):
+    """18 Nov 2026: a refused video is tried at the other qualities and on the CDN before the episode fails."""
+
+    def test_every_other_copy_once_best_first(self):
+        sources = [('480 (SD)', 'https://s1.example/getvid?evid=SD'), ('720 (HD)', 'https://s1.example/getvid?evid=HD')]
+        got = lifter_module.Lifter.alternate_urls(sources, 'https://s1.example/getvid?evid=HD', 'https://cdn.example/getvid?evid=SD')
+        self.assertEqual(got, ['https://s1.example/getvid?evid=SD', 'https://cdn.example/getvid?evid=SD', 'https://cdn.example/getvid?evid=HD'])
+
+    def test_a_backup_on_the_same_server_is_not_tried_twice(self):
+        sources = [('480 (SD)', 'https://s1.example/getvid?evid=SD')]
+        got = lifter_module.Lifter.alternate_urls(sources, 'https://s1.example/getvid?evid=SD', 'https://s1.example/getvid?evid=SD')
+        self.assertEqual(got, [])

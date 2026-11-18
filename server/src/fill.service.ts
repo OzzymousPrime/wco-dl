@@ -35,7 +35,7 @@ import { WcoVerdict } from './wco-health';
 
 const WCO_HELD = 'Until it reads again, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-import { fileIsEpisode, fileTitle, latestText, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, Source } from './wco-episodes.util';
+import { fileIsEpisode, fileTitle, latestText, linkCheck, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, Source } from './wco-episodes.util';
 
 /**
  * The episode map's back end (11 Nov 2026): look a show up in Sonarr from its wco link, then fill the
@@ -87,6 +87,14 @@ export interface FillJob {
   refused?: number;
 }
 
+/** Episodes to hand to Sonarr tonight, with the reason for the summary. `unlisted`: only while wcostream reads properly. */
+interface HandOff { slug: string; pref: ShowPref; eps: MapEpisode[]; why: string; unlisted?: boolean }
+
+/** Which handed-over episodes are searched for tonight: the newest `cap` by air date; the rest are only monitored. */
+export function newestIds(groups: { id: number; a?: string }[][], cap: number): Set<number> {
+  return new Set(groups.flat().sort((x, y) => (y.a ?? '').localeCompare(x.a ?? '') || y.id - x.id).slice(0, cap).map((e) => e.id));
+}
+
 /** What a set of automatic runs did, in all and per show. */
 export interface RunTally { filled: number; swapped: number; premium: number; kept: number; failed: number }
 /**
@@ -121,9 +129,16 @@ interface ShowPref {
   /** Followed: the nightly plan fills its gaps (and swaps to the dub when language is dub). */
   follow?: boolean; language?: 'dub' | 'sub'; title?: string; lastPlanned?: string;
   /** Per episode: how many nightly attempts so far and when the last one was. */
-  tries?: { [episodeId: string]: { n: number; last: string; handedToSonarr?: boolean } };
-  /** From the last count (the nightly plan, a look-up, or "Recount"): aired episodes with no file, monitored or not, and Japanese-only files. */
-  counts?: { missing: number; undub: number; at: string };
+  tries?: { [episodeId: string]: Try };
+  /**
+   * From the last count (the nightly plan, a look-up, or "Recount"): aired episodes with no file, monitored or not, and
+   * Japanese-only files. `onWco`: of those, how many wcostream lists, from the last night it was read (18 Nov 2026).
+   */
+  counts?: { missing: number; undub: number; at: string; onWco?: number; wcoAt?: string };
+  /** The link looks like another show (see linkCheck): left out of the plan until fixed, or confirmed with linkOk. */
+  linkWrong?: { why: string; at: string };
+  /** Someone said the link is right: the link check leaves it alone. */
+  linkOk?: boolean;
   /** Episodes the last night's plan found wcostream does not list (so were not queued). */
   unlisted?: { ids: number[]; at: string };
   /** From the last numbering check: how many episodes that need work the site lists under each way of numbering. */
@@ -132,6 +147,11 @@ interface ShowPref {
   announced?: number[];
 }
 interface ShowPrefs { [slug: string]: ShowPref }
+/**
+ * One episode's attempts. `dead`: nights on which the video could not be had (the video server refused it, or the
+ * page had no player, 18 Nov 2026); on the second such night the episode goes to Sonarr instead of four tries.
+ */
+export interface Try { n: number; last: string; handedToSonarr?: boolean; dead?: { n: number; day: string } }
 
 /** Retry an episode this many days after it aired (or after the last try); after the last, hand it to Sonarr. */
 export const RETRY_DAYS = [1, 3, 7, 14];
@@ -184,6 +204,16 @@ const DISK_RECHECK_MS = 10 * 60 * 1000;
 const DISK_TELL_MS = 12 * 3600 * 1000;
 /** An episode wcostream has not listed at two checks running goes to Sonarr at once if it aired this long ago (18 Nov 2026). */
 export const UNLISTED_HAND_DAYS = 14;
+/**
+ * Episodes handed to Sonarr are all marked monitored, but searched for at most this many a night, newest first
+ * (18 Nov 2026: about 3,600 old episodes reached the early hand-off at once; one search each would flood the indexers).
+ * The rest are picked up by Sonarr's own feed checks, or its "Search all missing".
+ */
+export const HAND_SEARCH_PER_NIGHT = 60;
+/** A followed show of which wcostream lists none of the missing episodes is read again after this many days, or when one airs. */
+export const NONE_ON_WCO_DAYS = 3;
+/** The page has no video player for the episode: usually premium-only, or removed. */
+export const NO_PLAYER = /No video player iframe found|No stream server available/i;
 /** Needs you offers to delete staged downloads untouched for this long. */
 export const STAGE_OLD_DAYS = 14;
 /** "wcostream cannot be read" is sent at most this often. */
@@ -790,6 +820,9 @@ export class FillService implements OnApplicationBootstrap {
             this.logger.warn(`${job.title}: ${job.refused} refusals in a row, waiting ${wait} minutes`);
           }
         } else if (ep.state === 'done') job.refused = 0;
+        if (ep.state === 'failed' && (VIDEO_REFUSED.test(ep.message ?? '') || NO_PLAYER.test(ep.message ?? ''))) {
+          await this.markDead(job.slug, ep.id).catch((e) => this.logger.warn(`Could not note ${job.title} ${ep.s}x${ep.e}: ${(e as Error).message}`));
+        }
         if (!job.episodes.some((e) => e.state === 'queued')) {
           job.finishedAt = new Date().toISOString();
           if (job.auto && !this.jobs.some((j) => j.auto && j.episodes.some((e) => ['queued', 'downloading', 'importing'].includes(e.state)))) {
@@ -839,6 +872,18 @@ export class FillService implements OnApplicationBootstrap {
           importIds = source.ids.filter((id) => id === ep.id || free.has(id));
         }
       } catch { /* Sonarr did not answer: the number is used, and the file's title is checked below */ }
+    }
+    // Someone picked it on the map: wcostream may have posted it since the list was read (kept six hours), so read
+    // it again once for this run before refusing (18 Nov 2026).
+    if (source.kind === 'none' && source.why === 'unlisted' && !job.auto && this.wco && !this.reread.has(job.id)) {
+      this.reread.add(job.id);
+      try {
+        const again = await this.wco.listing(job.slug, job.language ?? 'dub', true);
+        if (again && this.wcoVerdict().ok) source = resolveSources(again, await this.mapEpisodes(job.seriesId), !!job.absolute).get(ep.id) ?? source;
+      } catch { /* refused below */ }
+    } else if (source.kind === 'none' && source.why === 'unlisted' && !job.auto && this.wco) {
+      const cached = this.wco.peek(job.slug, job.language ?? 'dub');
+      if (cached) try { source = resolveSources(cached, await this.mapEpisodes(job.seriesId), !!job.absolute).get(ep.id) ?? source; } catch { /* refused below */ }
     }
     if (source.kind === 'none') {
       ep.state = 'failed';
@@ -973,9 +1018,29 @@ export class FillService implements OnApplicationBootstrap {
 
   private premiumToSonarr(ep: FillEpisode) { return this.handToSonarr([ep.id]); }
   /** Monitor the episodes in Sonarr and ask it to search for them: one call each, however many. */
-  private async handToSonarr(ids: number[]) {
+  private async handToSonarr(ids: number[], search = true) {
     await this.sonarr('put', 'episode/monitor', { episodeIds: ids, monitored: true });
-    await this.sonarr('post', 'command', { name: 'EpisodeSearch', episodeIds: ids });
+    if (search) await this.sonarr('post', 'command', { name: 'EpisodeSearch', episodeIds: ids });
+  }
+
+  /** The video of this episode could not be had tonight (counted once a night). */
+  private async markDead(slug: string, id: number) {
+    const day = new Date().toDateString();
+    await this.changePrefs((p) => {
+      const pref = p[slug]; if (!pref) return;
+      const tries = (pref.tries ??= {}), t = tries[id] ?? { n: 0, last: new Date().toISOString() };
+      if (t.dead?.day === day) return;
+      tries[id] = { ...t, dead: { n: (t.dead?.n ?? 0) + 1, day } };
+    });
+  }
+
+  /** Mark the link of a show right ("The link is right"): the link check leaves it alone from now on. */
+  async linkIsRight(body: { slug?: string }) {
+    let slug: string;
+    try { slug = parseShowLink(String(body?.slug ?? '')).slug; } catch (e) { throw new BadRequestException((e as Error).message); }
+    const prefs = await this.changePrefs((p) => { if (p[slug]) { p[slug].linkOk = true; delete p[slug].linkWrong; } });
+    if (!prefs[slug]) throw new NotFoundException('That show is not linked');
+    return { slug, linkOk: true };
   }
 
   // ---------- Following and the nightly plan ----------
@@ -1122,7 +1187,8 @@ export class FillService implements OnApplicationBootstrap {
       return { slug, title: p.title, seriesId: p.seriesId, language: p.language ?? 'dub',
         missing: p.counts?.missing ?? (st ? Math.max(0, st[0] - st[1]) : undefined),
         undub: p.language === 'sub' ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: facts?.split[p.seriesId] ?? [],
-        unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p) };
+        unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p),
+        onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why };
     });
   }
 
@@ -1148,23 +1214,50 @@ export class FillService implements OnApplicationBootstrap {
     // first, so new weekly episodes and nearly complete shows are not stuck behind a 200-episode backlog.
     const plans: { slug: string; pref: ShowPref; due: number[] }[] = [];
     const deadline = Date.now() + 30 * 60 * 1000;      // reading wcostream's lists must not eat the night
-    const handOff: { slug: string; pref: ShowPref; eps: MapEpisode[] }[] = [];
+    const handOff: HandOff[] = [];
+    const got = this.config.sonarrApiKey ? await this.allSeriesNow().catch(() => undefined) : undefined;
+    const series: any[] = Array.isArray(got) ? got : [];     // without the list, the names are not compared
+    const recentDay = new Date(Date.now() - NEW_DUB_DAYS * 86400000).toISOString().slice(0, 10);
     for (const [slug, pref] of Object.entries(prefs).filter(([, p]) => p.follow)) {
       try {
         const map = await this.mapEpisodes(pref.seriesId);
+        const last = pref.counts;
         pref.counts = countMap(map);
         const tries = (pref.tries ??= {});
-        const due: number[] = [];
+        const due: number[] = [], gaveUp: MapEpisode[] = [], dead: MapEpisode[] = [];
         for (const e of map) {
           const work = e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub');
           if (!work) { delete tries[e.id]; continue; }
           if (busy.has(e.id)) continue;
-          const verdict = retryDue(e.a, tries[e.id]);
+          const t = tries[e.id];
+          // The video could not be had on two nights (refused, or no player): Sonarr, not four tries (18 Nov 2026).
+          if ((t?.dead?.n ?? 0) >= 2 && e.st === 'missing') { if (!t!.handedToSonarr) dead.push(e); continue; }
+          const verdict = retryDue(e.a, t);
           if (verdict === 'due') due.push(e.id);
-          else if (verdict === 'give-up' && !tries[e.id]?.handedToSonarr && e.st === 'missing') {
-            await this.handToSonarr([e.id]);
-            tries[e.id] = { ...tries[e.id]!, handedToSonarr: true };
-            this.nightNotes.push(`${pref.title ?? slug} ${e.s}x${pad(e.e)}: tried ${RETRY_DAYS.length} times, handed to Sonarr`);
+          else if (verdict === 'give-up' && !t?.handedToSonarr && e.st === 'missing') gaveUp.push(e);
+        }
+        if (gaveUp.length) handOff.push({ slug, pref, eps: gaveUp, why: `tried ${RETRY_DAYS.length} times` });
+        if (dead.length) handOff.push({ slug, pref, eps: dead, why: 'its video could not be had on two nights' });
+        if (!due.length) { delete pref.unlisted; if (last?.onWco !== undefined) Object.assign(pref.counts, { onWco: last.onWco, wcoAt: last.wcoAt }); continue; }
+        // None of this show's gaps was on wcostream at the last read: read again after a few days, or when one airs.
+        const quiet = last?.onWco === 0 && last.wcoAt && Date.now() - new Date(last.wcoAt).getTime() < NONE_ON_WCO_DAYS * 86400000 &&
+          !map.some((e) => due.includes(e.id) && e.a && e.a >= recentDay);
+        if (quiet) { Object.assign(pref.counts, { onWco: 0, wcoAt: last!.wcoAt }); continue; }
+        // Is the link this show at all? Another show's list would plan episodes that can never match (18 Nov 2026).
+        if (this.wco && Date.now() < deadline && !pref.linkOk) {
+          const listing = await this.wco.listing(slug, pref.language ?? 'dub');
+          if (listing && this.wcoVerdict().ok) {
+            const s = series.find((x) => x.id === pref.seriesId);
+            const check = linkCheck(listing, map, !s || matchSeries(slug, [s]).length > 0);
+            if (!check.ok) {
+              if (!pref.linkWrong) this.nightNotes.push(`${pref.title ?? slug}: the link to ${slug} on wcostream looks like another show (${check.why}); left out until it is changed`);
+              pref.linkWrong = { why: check.why!, at: new Date().toISOString() };
+              continue;
+            }
+            delete pref.linkWrong;
+            const sources = resolveSources(listing, map, !!pref.absolute);
+            const work = map.filter((e) => e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub'));
+            Object.assign(pref.counts, { onWco: work.filter((e) => sources.get(e.id)?.kind !== 'none').length, wcoAt: new Date().toISOString() });
           }
         }
         const kept = await this.dropUnlisted(slug, pref, map, due, tries, deadline, handOff);
@@ -1174,17 +1267,27 @@ export class FillService implements OnApplicationBootstrap {
       }
     }
     // Only when wcostream read properly all through the plan: a page that broke halfway must not hand a library over.
-    if (this.wcoVerdict().ok) for (const { slug, pref, eps } of handOff) {
+    // Handed to Sonarr: every one monitored; searched for only up to HAND_SEARCH_PER_NIGHT a night, newest first.
+    // The unlisted ones only while wcostream reads properly (a broken site must not empty the list into Sonarr).
+    const ready = handOff.filter((h) => !h.unlisted || this.wcoVerdict().ok);
+    const searchFor = newestIds(ready.map((h) => h.eps), HAND_SEARCH_PER_NIGHT);
+    let searches = 0, unsearched = 0;
+    for (const { slug, pref, eps, why } of ready) {
+      const find = eps.filter((e) => searchFor.has(e.id));
+      const rest = eps.filter((e) => !find.includes(e));
       try {
-        await this.handToSonarr(eps.map((e) => e.id));
-        for (const e of eps) pref.tries![e.id] = { ...pref.tries![e.id], handedToSonarr: true };
+        if (find.length) await this.handToSonarr(find.map((e) => e.id));
+        if (rest.length) await this.handToSonarr(rest.map((e) => e.id), false);
+        searches += find.length; unsearched += rest.length;
+        for (const e of eps) pref.tries![e.id] = { ...pref.tries![e.id], n: pref.tries![e.id]?.n ?? 0, last: pref.tries![e.id]?.last ?? new Date().toISOString(), handedToSonarr: true };
         const codes = eps.map((e) => `${e.s}x${pad(e.e)}`);
         this.nightNotes.push(`${pref.title ?? slug} ${codes.length <= 4 ? codes.join(', ') : `${codes.length} episodes, ${codes[0]} to ${codes[codes.length - 1]}`}: ` +
-          `not on wcostream at two checks running, aired over ${UNLISTED_HAND_DAYS} days ago, handed to Sonarr`);
+          `${why}, handed to Sonarr${rest.length ? ` (${find.length ? `${find.length} searched for, ` : ''}${rest.length} monitored for Sonarr to find)` : ''}`);
       } catch (err) {
         this.logger.warn(`Handing ${slug} to Sonarr: ${(err as Error).message}`);
       }
     }
+    if (unsearched) this.logger.log(`Handed to Sonarr: ${searches} searched for, ${unsearched} monitored only (at most ${HAND_SEARCH_PER_NIGHT} searches a night)`);
     plans.sort((a, b) => a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
     for (const { slug, pref, due } of plans) {
       if (budget <= 0) break;
@@ -1208,7 +1311,11 @@ export class FillService implements OnApplicationBootstrap {
         const now = fresh[slug];
         if (!now || now.seriesId !== mine.seriesId) continue;
         if (mine.counts) now.counts = mine.counts;
-        if (mine.tries) now.tries = mine.tries;
+        if (mine.tries) {
+          for (const [id, t] of Object.entries(now.tries ?? {})) if (t.dead && mine.tries[id] && (mine.tries[id].dead?.n ?? 0) < t.dead.n) mine.tries[id].dead = t.dead;
+          now.tries = mine.tries;
+        }
+        if (mine.linkWrong && !now.linkOk) now.linkWrong = mine.linkWrong; else delete now.linkWrong;
         if (mine.lastPlanned) now.lastPlanned = mine.lastPlanned;
         if (mine.unlisted) now.unlisted = mine.unlisted; else delete now.unlisted;
       }
@@ -1225,7 +1332,7 @@ export class FillService implements OnApplicationBootstrap {
    * before either is unlikely to appear: it goes on the hand-off list for Sonarr now (18 Nov 2026), not after four tries.
    */
   private async dropUnlisted(slug: string, pref: ShowPref, map: MapEpisode[], due: number[], tries: NonNullable<ShowPref['tries']>,
-    deadline: number, handOff: { slug: string; pref: ShowPref; eps: MapEpisode[] }[] = []): Promise<number[]> {
+    deadline: number, handOff: HandOff[] = []): Promise<number[]> {
     if (!due.length) { delete pref.unlisted; return due; }
     if (!this.wco || Date.now() > deadline) return due;
     const listing = await this.wco.listing(slug, pref.language ?? 'dub');
@@ -1237,7 +1344,7 @@ export class FillService implements OnApplicationBootstrap {
     const before = new Set(pref.unlisted?.ids ?? []);
     const oldBefore = new Date(Date.now() - UNLISTED_HAND_DAYS * 86400000).toISOString().slice(0, 10);
     const hand = map.filter((e) => gone.includes(e.id) && before.has(e.id) && e.st === 'missing' && e.a && e.a <= oldBefore && !tries[e.id]?.handedToSonarr);
-    if (hand.length) handOff.push({ slug, pref, eps: hand });
+    if (hand.length) handOff.push({ slug, pref, eps: hand, why: `not on wcostream at two checks running, aired over ${UNLISTED_HAND_DAYS} days ago`, unlisted: true });
     for (const id of gone) tries[id] = { ...tries[id], n: (tries[id]?.n ?? 0) + 1, last: now };
     pref.unlisted = { ids: gone, at: now };
     this.logger.log(`${pref.title ?? slug}: ${gone.length} episode(s) not listed on wcostream, left out`);
@@ -1376,6 +1483,8 @@ export class FillService implements OnApplicationBootstrap {
   wake() { if (isNight()) void this.pump(); }
 
   private nightNotes: string[] = [];
+  /** Runs whose list was read again for an episode it did not list, so it is read once per run. */
+  private reread = new Set<string>();
 
   private get lastRunFile() { return path.join(this.configDir, 'last-run.json'); }
   private lastRun?: LastRun | null;     // undefined: not read from disk yet

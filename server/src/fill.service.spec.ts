@@ -395,6 +395,60 @@ describe('FillService worker', () => {
     expect((await (svc as any).prefs())['re-zero'].tries[101]).toMatchObject({ n: 2, handedToSonarr: true });
   });
 
+  // 18 Nov 2026: Kazoops! was linked to KonoSuba's page, and every night planned episodes that could never match.
+  it('leaves a show linked to another show out of the plan, says so, and takes it back once the link is called right', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const wco = { peek: () => undefined, listing: jest.fn().mockResolvedValue(buildListing([14, 15, 16].map((n) => `https://www.wcostream.tv/konosuba-season-2-episode-${n}-english-dubbed`))) };
+    const svc = new FillService((service as any).config, wco as any);
+    (svc as any).seriesCache = { at: Date.now(), list: [{ id: 575, title: 'Re: ZERO', titleSlug: 're-zero' }] };
+    await svc.setFollow({ slug: 'konosuba', seriesId: 575, follow: true, language: 'dub' });
+    await svc.setPaused(true);
+    expect(await svc.nightlyPlan()).toEqual([]);
+    const row = (await svc.followed()).find((x) => x.slug === 'konosuba')!;
+    expect(row.linkWrong).toMatch(/name on wcostream is not one of the show's names/);
+    expect((svc as any).nightNotes.join('\n')).toMatch(/Re: ZERO: the link to konosuba on wcostream looks like another show/);
+
+    await svc.linkIsRight({ slug: 'konosuba' });
+    expect((await svc.followed()).find((x) => x.slug === 'konosuba')!.linkWrong).toBeUndefined();
+    (svc as any).jobs = [];
+    expect((await svc.nightlyPlan()).length).toBe(1);                // checked no more: planned as usual
+  });
+
+  it('counts a dead video once a night, and on the second night hands the episode to Sonarr instead of more tries', async () => {
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    await (svc as any).markDead('re-zero', 101); await (svc as any).markDead('re-zero', 101);
+    expect((await (svc as any).prefs())['re-zero'].tries[101].dead.n).toBe(1);   // same night: once
+    await (svc as any).changePrefs((p: any) => { p['re-zero'].tries[101] = { n: 1, last: '2021-02-01T00:00:00Z', dead: { n: 2, day: 'Sun Feb 01 2021' } }; });
+    await svc.setPaused(true);
+    const made = await svc.nightlyPlan();
+    expect(made.flatMap((j) => j.episodes.map((e) => e.id))).not.toContain(101);
+    expect(calls.filter((c) => c.data?.name === 'EpisodeSearch').map((c) => c.data.episodeIds)).toEqual([[101]]);
+    expect((await (svc as any).prefs())['re-zero'].tries[101].handedToSonarr).toBe(true);
+    expect((svc as any).nightNotes.join('\n')).toMatch(/2x14: its video could not be had on two nights, handed to Sonarr/);
+  });
+
+  it('searches for the newest handed-over episodes only, up to the nightly cap', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { newestIds } = require('./fill.service');
+    const got = newestIds([[{ id: 1, a: '2020-01-01' }, { id: 2, a: '2024-05-01' }], [{ id: 3, a: '2026-11-01' }, { id: 4 }]], 2);
+    expect([...got].sort()).toEqual([2, 3]);
+  });
+
+  it('a run someone started reads the list again before refusing an episode the kept list does not have', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const W = 'https://www.wcostream.tv/';
+    const old = buildListing([W + 're-zero-season-2-episode-15-english-dubbed']);
+    const now = buildListing([W + 're-zero-season-2-episode-14-english-dubbed', W + 're-zero-season-2-episode-15-english-dubbed']);
+    const listing = jest.fn((slug: string, lang: string, fresh?: boolean) => Promise.resolve(fresh ? now : old));
+    (service as any).wco = { peek: () => now, listing };
+    const job = await run([101], { file: 'Re Zero-S02E14-English Dubbed.mp4' });
+    expect(job.episodes[0].state).toBe('done');
+    expect(listing.mock.calls.filter((c) => c[2] === true).length).toBe(1);
+  });
+
   it('counts old downloads in staging and deletes only those', async () => {
     const stage = path.join(dir, 'out', 'wco-gaps', 're-zero-dub');
     const old = path.join(stage, 'S02E14'), fresh = path.join(stage, 'S02E15'), empty = path.join(stage, 'S02E16');

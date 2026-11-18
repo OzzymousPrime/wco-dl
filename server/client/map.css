@@ -222,6 +222,8 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .qbtns{display:flex;gap:8px;align-items:center}
 .btn[aria-pressed=true]#pausebtn{background:var(--jp-soft);border-color:var(--jp-line);color:var(--jp)}
 #attention{margin-bottom:32px;scroll-margin-top:16px}
+#wronglinks{margin-bottom:32px}
+#wronglinks code{font:12px var(--mono);overflow-wrap:anywhere}
 .alist{list-style:none;margin:0;padding:0}
 .alist b{font-weight:500}
 .alist .msg{display:block;color:var(--text-2);font-size:12px;overflow-wrap:anywhere}

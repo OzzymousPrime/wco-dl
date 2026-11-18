@@ -268,7 +268,7 @@
   // They are dotted, left out of "select all" and not queued overnight: a download of them fails.
   // After a run for this show finishes the answer is asked for again (wcoStale): what needed work has changed. The old
   // note and dots stay up until the new answer is in, so nothing blinks.
-  let wcoFor = '', wcoGone = new Set(), wcoTogether = {}, wcoStale = false;
+  let wcoFor = '', wcoGone = new Set(), wcoTogether = {}, wcoStale = false, wcoPending = null;
   // o.fresh: read the show page again now rather than use the copy kept for six hours ("Check wcostream again").
   async function wcoNote(id, o = {}) {
     const key = `${id}|${show.slug}|${lang()}|${show.absolute}`;
@@ -361,7 +361,9 @@
     $('split').hidden = !split.length;
     $('split').textContent = split.length ? `This show also has a folder Sonarr does not track: ${split.join(', ')}. If episodes look missing here, they may be in there: merge the folders before downloading them again.` : '';
     dubNote(show.series.id);
-    wcoNote(show.series.id);
+    // Download waits for this answer (20 seconds at most), so nothing is picked that wcostream does not list.
+    const asked = wcoPending = Promise.race([wcoNote(show.series.id), new Promise((r) => setTimeout(r, 20000))])
+      .finally(() => { if (wcoPending === asked) wcoPending = null; });
     eps = show.episodes.map((e, i) => ({ ...e, i, nowco: wcoGone.has(e.id) }));
     if (!keepSelection) sel.clear();
     const count = (s) => eps.filter((e) => e.st === s).length;
@@ -569,6 +571,18 @@
     push(); return out.join(',');
   }
   $('go').onclick = async () => {
+    // Picked before wcostream's list arrived (18 Nov 2026: 23 such episodes failed in one run): wait for it, and leave
+    // out what it does not list, saying so, rather than send episodes the server will refuse.
+    const asked = picked();
+    if (wcoPending) { $('go').disabled = true; await wcoPending; $('go').disabled = false; }
+    asked.forEach((e) => { if (e.nowco) sel.delete(e.i); });
+    const off = asked.filter((e) => !sel.has(e.i)).length;
+    if (off) {
+      render();
+      status(`${off} of the episodes picked ${off === 1 ? 'is' : 'are'} not on wcostream, so ${off === 1 ? 'it was' : 'they were'} left out.` +
+        (picked().length ? ' Press Download again for the rest.' : ' Nothing else was picked.'));
+      return;
+    }
     const p = picked(); if (!p.length || !show) return;
     const sw = p.filter(isSwap).length;
     if (sw && !confirmSwap) {   // replacing files: one more deliberate click
@@ -898,7 +912,7 @@
     for (const j of allRuns) for (const e of j.episodes) if (ACTIVE.includes(e.state)) {
       const a = act.get(j.seriesId) || { n: 0, cur: null }; a.n++; if (isWorking(e)) a.cur = e; act.set(j.seriesId, a);
     }
-    renderAttention(); renderStage(); renderNight();
+    renderAttention(); renderLinks(); renderStage(); renderNight();
     if (!followedLoaded) return;                       // the still grey rows stay until the first answer
     $('followedlist').removeAttribute('aria-busy');
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
@@ -920,7 +934,10 @@
       const a = act.get(x.seriesId);
       const marks = (x.language === 'sub' ? '<span class="tag">sub</span>' : '') +
         (x.switchTo ? `<span class="tag" title="Numbered ${x.switchTo === 'absolute' ? 'straight through' : 'by season'}, wcostream would supply more of this show's missing episodes. Open the show to switch.">check numbering</span>` : '') +
-        (x.unlisted > 0 ? `<span class="tag" title="Last night's plan found ${x.unlisted} episode${x.unlisted === 1 ? '' : 's'} that wcostream does not list, so they were not queued">${x.unlisted} not on wcostream</span>` : '') +
+        (x.linkWrong ? `<span class="tag gapmark" title="The overnight run leaves it out: ${esc(x.linkWrong)}">wrong link?</span>` : '') +
+        (!x.linkWrong && needs(x) && x.onWco === 0 ? `<span class="tag" title="Last time wcostream was read it listed none of this show's missing episodes. Sonarr gets them as they become due; wcostream is read again every few days.">none on wcostream</span>`
+          : !x.linkWrong && needs(x) && x.onWco > 0 && x.onWco < (x.missing || 0) + (x.undub || 0) ? `<span class="tag" title="Last time wcostream was read it listed ${x.onWco} of the episodes this show needs">${x.onWco} on wcostream</span>`
+          : x.unlisted > 0 ? `<span class="tag" title="Last night's plan found ${x.unlisted} episode${x.unlisted === 1 ? '' : 's'} that wcostream does not list, so they were not queued">${x.unlisted} not on wcostream</span>` : '') +
         ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '');
       const lacks = needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>`
         : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;
@@ -979,6 +996,28 @@
     $('stage').hidden = false;
     if ($('stage').dataset.h !== html) { $('stage').dataset.h = html; $('stage').innerHTML = html; }
   }
+  // Linked to the wrong show (18 Nov 2026): the nightly link check found a followed show whose list on wcostream looks
+  // like another show. Find the right one (a wcostream search for the Sonarr title), say the link is right, or unfollow.
+  function renderLinks() {
+    const bad = followed.filter((x) => x.linkWrong);
+    $('wronglinks').hidden = !bad.length;
+    $('wlcount').textContent = bad.length || '';
+    UI.patchList($('wllist'), bad.map((x) => ({ key: x.slug, html: `<li data-key="${esc(x.slug)}"><div class="ahead">${UI.poster(x.seriesId, x.title)}<span class="ft"><b>${esc(x.title)}</b>` +
+      `<span class="msg">Linked to <code>${esc(x.slug)}</code>: ${esc(x.linkWrong)}</span></span>` +
+      `<span class="acts"><button class="btn" data-wl="find" type="button">${UI.icon('search')}Find it on wcostream</button>` +
+      `<button class="linkbtn" data-wl="ok" type="button">The link is right</button>` +
+      `<button class="linkbtn danger" data-wl="unfollow" type="button" aria-label="Unfollow ${esc(x.title)}">Unfollow</button></span></div></li>` })));
+  }
+  $('wllist').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-wl]'); if (!b) return;
+    const x = followed.find((f) => f.slug === b.closest('li').dataset.key); if (!x) return;
+    if (b.dataset.wl === 'find') { nameSearch(x.title); return; }
+    if (b.dataset.wl === 'unfollow') { unfollow(x); return; }
+    b.disabled = true;
+    try { await api('POST', '/links/ok', { slug: x.slug }); x.linkWrong = undefined; toast(`${x.title}: the link stays, and is not checked again`); renderHome(); }
+    catch (e) { status(`Could not keep the link: ${e.message}`, true); b.disabled = false; }
+  });
+
   // Last night (18 Nov 2026): what the automatic runs did, as the phone message said it, with a link to each show.
   // Shown for a day and a half after the runs finished; the phone message links here (#night) and opens it.
   function renderNight() {

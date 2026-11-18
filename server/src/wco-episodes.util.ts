@@ -125,6 +125,29 @@ export type Source =
 
 export interface EpisodeLike { id: number; s: number; e: number; abs?: number; t?: string }
 
+/**
+ * Is the wcostream show a link points at this Sonarr series at all (18 Nov 2026)? Three followed shows were linked to
+ * other shows (Kazoops! to KonoSuba, Snow White's Revenge to Dandadan, a 2019 series to its 1991 namesake), so every
+ * night planned episodes that could never match. When both sides have at least five episode titles, the titles
+ * decide: none alike (or one, in twenty or more) means another show. Without titles to compare, `namesAgree` (the
+ * link's name is one of the series' names in Sonarr) decides. An empty listing says nothing, so counts as right.
+ */
+export function linkCheck(l: WcoListing, all: EpisodeLike[], namesAgree: boolean): { ok: boolean; why?: string; compared: number; matched: number } {
+  const site = [...new Set(l.links.map(linkTitle).filter(Boolean))].slice(0, 60);
+  const mine = [...new Set(all.filter((e) => e.s > 0).map((e) => realTitle(e.t ?? '')).filter(Boolean))];
+  if (site.length >= 5 && mine.length >= 5) {
+    const exact = new Set(mine);
+    const near = (t: string) => exact.has(t) || mine.some((s) => (s.length >= 8 && t.includes(s)) || (t.length >= 8 && s.includes(t)) || alike(s, t) >= SAME);
+    const allowed = site.length >= 20 ? 1 : 0;
+    let matched = 0;
+    for (const t of site) if (near(t) && ++matched > allowed) return { ok: true, compared: site.length, matched };
+    return { ok: false, compared: site.length, matched,
+      why: `${matched ? 'only 1' : 'none'} of ${site.length} episode titles on wcostream ${matched ? 'is' : 'are'} this show's in Sonarr` };
+  }
+  if (!l.count || namesAgree) return { ok: true, compared: 0, matched: 0 };
+  return { ok: false, compared: 0, matched: 0, why: "its name on wcostream is not one of the show's names in Sonarr, and its episodes there have no titles to compare" };
+}
+
 /** Where each episode of a show can be had from, given the site's list. */
 export function resolveSources(l: WcoListing, all: EpisodeLike[], absolute: boolean): Map<number, Source> {
   const order = [...all].filter((e) => e.s > 0).sort((a, b) => a.s - b.s || a.e - b.e);

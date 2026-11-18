@@ -1,4 +1,4 @@
-import { alike, buildListing, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, pickedBy, realTitle, resolveSources } from './wco-episodes.util';
+import { alike, buildListing, linkCheck, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, pickedBy, realTitle, resolveSources } from './wco-episodes.util';
 
 const page = (items: string) => `<html><body><div>${items}</div></body></html>`;
 const a = (cls: string, href: string, lang?: string) => `<a class="${cls}" href="${href}"${lang ? ` data-lang="${lang}"` : ''}>x</a>`;
@@ -153,5 +153,27 @@ describe('reading a show page again (18 Nov 2026)', () => {
     expect([first?.count, kept?.count, again?.count, reads]).toEqual([7, 7, 8, 2]);
     expect(svc.ownerOf('https://www.wcostream.tv/overgeared-episode-8-english-dubbed/')).toBe('overgeared');
     expect(svc.ownerOf('https://www.wcostream.tv/something-else-episode-1-english-dubbed')).toBeUndefined();
+  });
+});
+
+describe('is the link this show at all (18 Nov 2026)', () => {
+  const W = 'https://www.wcostream.tv/';
+  const mine = ['Pups Make a Splash', 'Pups Fall Festival', 'Pups Save the Sea Turtles', 'Pup and the Very Big Baby', 'Pups and the Kitty-tastrophe', 'Pups Save a Train']
+    .map((t, i) => ({ id: i + 1, s: 1, e: i + 1, t }));
+  const titled = (titles: string[]) => buildListing(titles.map((t, i) => `${W}some-show-episode-${i + 1}-${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-english-dubbed`));
+
+  it('another show\'s titles: wrong, whatever the names say', () => {
+    const other = titled(['A Gift for Aqua', 'An Explosion', 'Panties for the Hero', 'The Cabbage Harvest', 'A Rival Appears', 'The Lake Purge']);
+    expect(linkCheck(other, mine, true)).toMatchObject({ ok: false, compared: 6, matched: 0, why: 'none of 6 episode titles on wcostream are this show\'s in Sonarr' });
+  });
+  it('its own titles, even a few and spelt differently: right', () => {
+    const same = titled(['Pups Make a Splash', 'Pups Fall Festival', 'Pups Save the Sea Turtle', 'Something Else', 'Another', 'Third']);
+    expect(linkCheck(same, mine, false)).toMatchObject({ ok: true });
+  });
+  it('no titles to compare: the names decide; an empty list says nothing', () => {
+    const bare = buildListing([1, 2, 3, 4, 5, 6].map((n) => `${W}konosuba-episode-${n}-english-dubbed`));
+    expect(linkCheck(bare, mine, false)).toMatchObject({ ok: false, why: expect.stringMatching(/name on wcostream is not one of the show's names/) });
+    expect(linkCheck(bare, mine, true).ok).toBe(true);
+    expect(linkCheck(buildListing([]), mine, false).ok).toBe(true);
   });
 });

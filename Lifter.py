@@ -234,6 +234,19 @@ class Lifter(object):
         source_urls, backup_url = self.get_download_url(hidden_url, referer=url)
         return source_urls, backup_url, hidden_url
 
+    @staticmethod
+    def alternate_urls(source_urls, download_url, backup_url):
+        """The other copies to try when the chosen one is refused: the other qualities on the stream server, best
+        first, then the backup (the CDN's SD copy), then the CDN's other qualities. No repeats, never the chosen one."""
+        server = [url for _, url in reversed(source_urls)]
+        cdn = backup_url.split('/getvid?evid=')[0] if backup_url and '/getvid?evid=' in backup_url else ''
+        on_cdn = [cdn + '/getvid?evid=' + url.split('getvid?evid=', 1)[1] for url in server if cdn and 'getvid?evid=' in url]
+        out = []
+        for url in server + [backup_url] + on_cdn:
+            if url and url != download_url and url not in out:
+                out.append(url)
+        return out
+
     def select_download_url(self, source_urls):
         # source_urls is ordered from lowest to highest quality.
         if self.resolution == '480':
@@ -269,7 +282,8 @@ class Lifter(object):
 
         downloader = Downloader(logger=self.logger, download_url=download_url, backup_url=backup_url,
                                 hidden_url=hidden_url, output=output, header=download_header, user_agent=user_agent,
-                                show_info=show_info, settings=self.settings, quiet=self.quiet, session=self.session)
+                                show_info=show_info, settings=self.settings, quiet=self.quiet, session=self.session,
+                                alternates=self.alternate_urls(source_urls, download_url, backup_url))
         self._count('download_errors' if downloader.failed else 'downloaded')
 
     def _count(self, counter):
@@ -466,13 +480,15 @@ class Lifter(object):
     @staticmethod
     def info_extractor(url):
         url = re.sub(r'^https?://[^/]+/', '', url)
+        # The number must end at a space or at the end: a link that ends in the number ("...-episode-10") used to
+        # read as episode 1 with "0" left over, and "...-episode-9" as episode 0, so the file was misnamed.
+        name = url.split('?')[0].rstrip('/').replace('-', ' ')
         try:
             if "season" in url:
-                show_name, season, episode, desc = re.findall(r'([a-zA-Z0-9].*)\s(season\s\d+\s?)(episode\s\d+\s)?(.+)',
-                                                              url.replace('-', ' '))[0]
+                show_name, season, episode, desc = re.findall(
+                    r'([a-zA-Z0-9].*)\s(season\s\d+)(?:\s(episode\s\d+))?(?:\s(.*))?$', name)[0]
             else:
-                show_name, episode, desc = re.findall(r'([a-zA-Z0-9].*)\s(episode\s\d+\s?)(.+)', url.replace(
-                    '-', ' '))[0]
+                show_name, episode, desc = re.findall(r'([a-zA-Z0-9].*)\s(episode\s\d+)(?:\s(.*))?$', name)[0]
                 season = "season 1"
         except:
             show_name = url

@@ -156,6 +156,13 @@ export class AppController {
     return this.fillService.setLinks(body);
   }
 
+  /** "The link is right" (18 Nov 2026): the nightly link check leaves this show's link alone from now on. */
+  @Post('links/ok')
+  @UseGuards(JsonRequestGuard)
+  linkOk(@Body() body: any) {
+    return this.fillService.linkIsRight(body);
+  }
+
   @Post('fill/plan-now')
   @UseGuards(JsonRequestGuard)
   /** "Fill now" (18 Nov 2026): plan what is due for every followed show and start it straight away; answers the runs it made. */

@@ -65,8 +65,10 @@ export class AppController {
 
   // Which of a show's episodes wcostream does not list (12 Nov 2026).
   @Get('show/wco')
-  showWco(@Query('url') url: string, @Query('seriesId') seriesId?: string, @Query('lang') lang?: string, @Query('absolute') absolute?: string) {
-    return this.fillService.wcoCheck(url, seriesId, lang, absolute);
+  // fresh=1 reads the show page again; pick=<episode link> says which episodes that link is (18 Nov 2026).
+  showWco(@Query('url') url: string, @Query('seriesId') seriesId?: string, @Query('lang') lang?: string, @Query('absolute') absolute?: string,
+    @Query('fresh') fresh?: string, @Query('pick') pick?: string) {
+    return this.fillService.wcoCheck(url, seriesId, lang, absolute, fresh, pick);
   }
 
   // A show's small poster, for the lists. Fetched from Sonarr by the server and kept by the browser for a day.

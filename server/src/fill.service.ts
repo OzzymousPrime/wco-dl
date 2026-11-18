@@ -35,7 +35,7 @@ import { WcoVerdict } from './wco-health';
 
 const WCO_HELD = 'Until it reads again, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-import { fileIsEpisode, fileTitle, latestText, linkTitle, numberingFit, NumberingFit, resolveSources, Source } from './wco-episodes.util';
+import { fileIsEpisode, fileTitle, latestText, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, Source } from './wco-episodes.util';
 
 /**
  * The episode map's back end (11 Nov 2026): look a show up in Sonarr from its wco link, then fill the
@@ -567,6 +567,10 @@ export class FillService implements OnApplicationBootstrap {
   async lookup(link: string, seriesIdParam?: string, absoluteParam?: string) {
     let parsed;
     try { parsed = parseShowLink(link); } catch (e) { throw new BadRequestException((e as Error).message); }
+    // An episode's own link (18 Nov 2026): open its show, and say which episode was pasted so the map can pick it.
+    // The show is the one whose kept listing holds the link, else the one its name starts with.
+    const pick = parsed.episode;
+    if (pick) parsed = { ...parsed, slug: this.wco?.ownerOf(pick.link) ?? parsed.slug };
     const prefs = await this.prefs();
     let all = await this.allSeriesNow();
     let seriesId = seriesIdParam ? Number(seriesIdParam) : prefs[parsed.slug]?.seriesId;
@@ -576,7 +580,7 @@ export class FillService implements OnApplicationBootstrap {
     if (!seriesId && candidates.length === 1) seriesId = candidates[0].id;
     const brief = (s: any) => ({ id: s.id, title: s.title, year: s.year, path: s.path });
     if (!seriesId) {
-      return { slug: parsed.slug, language: parsed.language, series: null, candidates: candidates.map(brief), episodes: [] };
+      return { slug: parsed.slug, language: parsed.language, series: null, candidates: candidates.map(brief), episodes: [], ...(pick ? { pick } : {}) };
     }
     const series = all.find((s) => s.id === seriesId) ?? (await this.sonarr('get', `series/${seriesId}`));
     let absolute = prefs[parsed.slug]?.absolute ?? false;
@@ -596,6 +600,7 @@ export class FillService implements OnApplicationBootstrap {
       slug: parsed.slug, language: parsed.language, series: brief(series), absolute,
       follow: !!pref?.follow, followLanguage: pref?.language ?? 'dub',
       candidates: candidates.map(brief), episodes, split: (await this.splitFolders()).get(seriesId) ?? [],
+      ...(pick ? { pick } : {}),
     };
   }
 
@@ -1279,7 +1284,12 @@ export class FillService implements OnApplicationBootstrap {
   }
 
   /** For the map: which episodes that need work does wcostream not list? Reads the show page (cached six hours). */
-  async wcoCheck(link: string, seriesIdParam?: string, langParam?: string, absoluteParam?: string) {
+  /**
+   * `fresh` reads the show page again rather than use the copy kept for six hours. `pickLink`, an episode's own link,
+   * asks which of the show's episodes in Sonarr it is: `picked` lists them (two when the link holds two), or is empty
+   * when that episode cannot be told apart, for example a number whose title says it is a different episode.
+   */
+  async wcoCheck(link: string, seriesIdParam?: string, langParam?: string, absoluteParam?: string, freshParam?: string, pickLink?: string) {
     let parsed;
     try { parsed = parseShowLink(link); } catch (e) { throw new BadRequestException((e as Error).message); }
     const none = { checked: false, unlisted: [] as number[], latest: '' };
@@ -1289,10 +1299,11 @@ export class FillService implements OnApplicationBootstrap {
     if (!seriesId) return none;
     const language = langParam === 'sub' || langParam === 'dub' ? langParam : prefs[parsed.slug]?.language ?? 'dub';
     const absolute = absoluteParam !== undefined ? absoluteParam === 'true' : !!prefs[parsed.slug]?.absolute;
-    const listing = await this.wco.listing(parsed.slug, language);
+    const listing = await this.wco.listing(parsed.slug, language, freshParam === '1' || freshParam === 'true');
     if (!listing || !this.wcoVerdict().ok) return none;
     const map = await this.mapEpisodes(seriesId);
     const sources = resolveSources(listing, map, absolute);
+    const picked = pickLink ? pickedBy(pickLink, map, sources, absolute) : undefined;
     const work = map.filter((e) => e.st === 'missing' || e.st === 'undub' || e.st === 'unknown');
     const gone = work.filter((e) => sources.get(e.id)?.kind === 'none');
     // Episodes the site has inside a link that holds several: the map says which go together.
@@ -1301,7 +1312,7 @@ export class FillService implements OnApplicationBootstrap {
     const other = { ...numberingFit(listing, map, new Set(work.filter((e) => e.st !== 'unknown').map((e) => e.id)), absolute) };
     return { checked: true, unlisted: gone.map((e) => e.id), different: gone.filter((e) => (sources.get(e.id) as any).why === 'different').length,
       byTitle: work.filter((e) => sources.get(e.id)?.kind === 'title').length, together, fit: other,
-      latest: latestText(listing), language, listed: listing.count };
+      latest: latestText(listing), language, listed: listing.count, readAt: this.wco.readAt(parsed.slug, language), ...(picked ? { picked } : {}) };
   }
 
   /**

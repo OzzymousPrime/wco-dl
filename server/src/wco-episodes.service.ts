@@ -49,6 +49,9 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
   /** How reads from wcostream are going; undefined in tests that build the service by hand. */
   get health() { return this.app?.health; }
 
+  /** When the kept listing was read (ms), for the map's "read 2 hours ago". */
+  readAt(slug: string, language: string): number | undefined { return this.cache.get(`${slug}|${language}`)?.at; }
+
   peek(slug: string, language: string): WcoListing | undefined {
     const hit = this.cache.get(`${slug}|${language}`);
     return hit && Date.now() - hit.at < TTL_MS ? hit.listing : undefined;
@@ -58,13 +61,32 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
    * The show's listing, or undefined when unknown (the fetch failed, or the page gave nothing while the parser has
    * never found an episode anywhere). Unknown never blocks a download.
    */
-  listing(slug: string, language: string): Promise<WcoListing | undefined> {
+  /**
+   * The show whose remembered listing holds this episode link, if any (18 Nov 2026). An episode's name does not
+   * always start with its show's ("pokemon-horizons-the-search-for-laqua-episode-136" is on "pokemon-horizons-the-series").
+   */
+  ownerOf(link: string): string | undefined {
+    const want = String(link ?? '').toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/\/+$/, '');
+    for (const [key, v] of this.cache) {
+      if (v.listing.links.some((l) => l.toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/\/+$/, '') === want)) return key.split('|')[0];
+    }
+    return undefined;
+  }
+
+  /**
+   * `fresh` (18 Nov 2026) reads the show page again even when a copy younger than six hours is kept: a new episode
+   * posted since then would otherwise stay hidden for up to six hours. Asked for by a pasted episode link and by the
+   * map's "Check wcostream again".
+   */
+  listing(slug: string, language: string, fresh = false): Promise<WcoListing | undefined> {
     const key = `${slug}|${language}`;
-    const hit = this.peek(slug, language);
+    const before = this.cache.get(key)?.at;            // the copy a fresh read must replace
+    const hit = fresh ? undefined : this.peek(slug, language);
     if (hit) return Promise.resolve(hit.count === 0 && !this.parserWorks ? undefined : hit);
     const run = this.queue.then(async () => {
+      // A read that finished while this one waited its turn counts as fresh.
       const again = this.peek(slug, language);
-      if (again) return again;
+      if (again && (!fresh || this.cache.get(key)!.at !== before)) return again;
       const url = `${SHOW}${slug}?lang=${language}`;
       try {
         const html = await this.app.fetchPageHtml(url);

@@ -21,6 +21,21 @@ describe('parseShowLink', () => {
   it('takes a bare slug', () => {
     expect(parseShowLink('one-piece')).toEqual({ slug: 'one-piece' });
   });
+  it("reads an episode's own link as its show, with the episode to pick (18 Nov 2026)", () => {
+    expect(parseShowLink('https://www.wcostream.tv/overgeared-episode-8-english-dubbed')).toEqual({
+      slug: 'overgeared', language: 'dub',
+      episode: { link: 'https://www.wcostream.tv/overgeared-episode-8-english-dubbed', season: undefined, number: 8 },
+    });
+    expect(parseShowLink('https://www.wcostream.tv/my-show-season-2-episode-5-english-subbed')).toEqual({
+      slug: 'my-show', language: 'sub',
+      episode: { link: 'https://www.wcostream.tv/my-show-season-2-episode-5-english-subbed', season: 2, number: 5 },
+    });
+    expect(parseShowLink('overgeared-episode-8-english-dubbed').slug).toBe('overgeared');
+  });
+  it('leaves show links and show names with "episode" in them alone', () => {
+    expect(parseShowLink('https://www.wcostream.tv/anime/the-final-episode-1').episode).toBeUndefined();
+    expect(parseShowLink('the-final-episode-1')).toEqual({ slug: 'the-final-episode-1' });
+  });
   it('rejects other sites and junk', () => {
     expect(() => parseShowLink('https://example.com/anime/x')).toThrow();
     expect(() => parseShowLink('')).toThrow();

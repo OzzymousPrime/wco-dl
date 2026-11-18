@@ -46,6 +46,8 @@
   // history entry, so the browser's Back returns to Home where you were on it and Forward opens the show again. Each
   // entry keeps its own scroll position (the browser's own restoring cannot be used: the view is swapped after it runs).
   let link = '', view = 'home';
+  // A pasted episode link (18 Nov 2026): the episode to pick once wcostream has been read again for its show.
+  let pickNext = null;
   const settled = new Set();                           // episodes whose square has played its settle, for the show on screen
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   try { history.scrollRestoration = 'manual'; } catch { /* an old browser: it keeps its own restoring */ }
@@ -72,7 +74,7 @@
     t.finished.then(done, done);
   }
   function showHome() {
-    view = 'home'; show = null; link = ''; sel.clear(); fills = new Map();
+    view = 'home'; show = null; link = ''; pickNext = null; sel.clear(); fills = new Map();
     $('show').hidden = true; $('picker').hidden = true; $('found').hidden = true; $('run').hidden = true; $('bar').classList.remove('on');
     $('empty').hidden = false; status(''); setTrail(''); hideTip(); document.documentElement.style.setProperty('--sbarh', '0px');
     idleTitle = document.title = BASE_TITLE;
@@ -106,6 +108,9 @@
     try { got = await api('GET', `/show?url=${encodeURIComponent(to)}${o.extra || ''}`); }
     catch (e) { status(`Could not look that up: ${e.message}`, true); return; }
     status('');
+    // An episode's own link opens its show; the address and later look-ups use the show, not the episode.
+    if (got.pick) { pickNext = got.pick; to = got.slug; }
+    else if (got.slug !== show?.slug) pickNext = null;   // another show: forget it (picking its series in Sonarr keeps it)
     const url = '?url=' + encodeURIComponent(to);
     const same = view === 'show' && !!show?.series && got.series?.id === show.series.id;   // this show again (its numbering, a finished run): stay put
     if (o.push !== false && location.search !== url) { keepScroll(); history.pushState({ v: 'show', home: view === 'home' }, '', url); }
@@ -264,14 +269,21 @@
   // After a run for this show finishes the answer is asked for again (wcoStale): what needed work has changed. The old
   // note and dots stay up until the new answer is in, so nothing blinks.
   let wcoFor = '', wcoGone = new Set(), wcoTogether = {}, wcoStale = false;
-  async function wcoNote(id) {
+  // o.fresh: read the show page again now rather than use the copy kept for six hours ("Check wcostream again").
+  async function wcoNote(id, o = {}) {
     const key = `${id}|${show.slug}|${lang()}|${show.absolute}`;
-    if (wcoFor === key && !wcoStale) return;
+    const pick = pickNext;
+    if (wcoFor === key && !wcoStale && !pick && !o.fresh) return;
     if (wcoFor !== key) { wcoGone = new Set(); wcoTogether = {}; $('wconote').hidden = true; }
-    wcoFor = key; wcoStale = false;
+    wcoFor = key; wcoStale = false; pickNext = null;
+    const fresh = !!(o.fresh || pick);
+    if (fresh) status(pick ? `Reading wcostream again for episode ${pick.number}. This can take a minute.` : 'Reading wcostream again. This can take a minute.');
     try {
-      const d = await (await fetch(`/show/wco?url=${encodeURIComponent(show.slug)}&seriesId=${id}&lang=${lang()}&absolute=${!!show.absolute}`)).json();
-      if (wcoFor !== key || !d.checked) return;
+      const d = await (await fetch(`/show/wco?url=${encodeURIComponent(show.slug)}&seriesId=${id}&lang=${lang()}&absolute=${!!show.absolute}` +
+        (fresh ? '&fresh=1' : '') + (pick ? '&pick=' + encodeURIComponent(pick.link) : ''))).json();
+      if (wcoFor !== key) return;
+      if (!d.checked) { if (fresh) status('wcostream could not be read just now. Try "Check wcostream again" in a minute.', true); return; }
+      if (fresh) status('');
       wcoGone = new Set(d.unlisted); wcoTogether = d.together || {};
       eps.forEach((e) => { e.nowco = wcoGone.has(e.id); if (e.el) e.el.classList.toggle('nowco', e.nowco); });
       const n = d.unlisted.length, version = lang() === 'dub' ? 'English dub' : 'subbed';
@@ -287,12 +299,40 @@
       // site has no season links, so a number can only mean one episode.
       const f = d.fit || {}, mine = show.absolute ? f.absolute : f.season, other = show.absolute ? f.season : f.absolute;
       const offer = other > mine + 2 && (show.absolute || f.flat);
-      $('wconote').innerHTML = parts.map(esc).join(' ') + (offer ? ` Numbered ${show.absolute ? 'by season' : 'straight through'}, wcostream would supply ${other} of the ${f.work} episodes that need work, not ${mine}. <button class="linkbtn" id="numswitch" type="button">Switch numbering</button>` : '');
-      $('wconote').hidden = !parts.length && !offer;
+      // What was read and when, with a way to read it again: a new episode can be posted within the six hours a
+      // reading is kept, and until then the map counts it as not on wcostream.
+      const read = `wcostream lists ${d.listed} episode${d.listed === 1 ? '' : 's'}${d.latest ? `, up to ${d.latest}` : ''}` +
+        (d.readAt ? `; read ${ago(d.readAt)}` : '') + '.';
+      $('wconote').innerHTML = parts.map(esc).join(' ') + (offer ? ` Numbered ${show.absolute ? 'by season' : 'straight through'}, wcostream would supply ${other} of the ${f.work} episodes that need work, not ${mine}. <button class="linkbtn" id="numswitch" type="button">Switch numbering</button>` : '') +
+        ` <span class="wcoread">${esc(read)} <button class="linkbtn" id="wcoagain" type="button">Check wcostream again</button></span>`;
+      $('wconote').hidden = false;
       $('numswitch')?.addEventListener('click', () => $('numbering').querySelector(`[data-v="${!show.absolute}"]`).click());
+      $('wcoagain').addEventListener('click', () => { if (show?.series) wcoNote(show.series.id, { fresh: true }); });
       render();
+      if (pick) pickFromLink(pick, d.picked || []);
     } catch { /* the check is optional */ }
   }
+
+  // The pasted episode, picked on the map and brought into view; or a line saying why it was not.
+  function pickFromLink(p, ids) {
+    const name = `Episode ${p.season ? p.season + 'x' + pad(p.number) : p.number}`;
+    const mine = eps.filter((e) => ids.includes(e.id));
+    const can = mine.filter((e) => e.el && selectable(e));
+    if (can.length) {
+      can.forEach((e) => sel.add(e.i)); render();
+      can[0].el.scrollIntoView({ block: 'center', behavior: reduce.matches ? 'auto' : 'smooth' });
+      status(`${name} from the link is picked${can.length > 1 ? ` (with ${can.length - 1} more: it comes in one file)` : ''}. Download is at the bottom.`);
+    } else if (mine.length) {
+      const e = mine[0];
+      status(fills.get(e.id) && ACTIVE.includes(fills.get(e.id).state) ? `${name} is already queued.`
+        : e.st === 'future' ? `Sonarr says ${name} has not aired yet. Refresh the series in Sonarr, then open the link again.`
+        : `${name} is already here (${STATE_WORDS[e.st]}).`);
+      e.el?.scrollIntoView({ block: 'center', behavior: reduce.matches ? 'auto' : 'smooth' });
+    } else {
+      status(`wcostream lists ${name}, but it could not be matched to an episode in Sonarr with certainty. Pick it on the map yourself.`, true);
+    }
+  }
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
 
   // The next English dub episodes of this show, from the dub calendar (AnimeSchedule.net). Asked once per show.
   let dubFor;

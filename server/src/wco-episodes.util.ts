@@ -205,3 +205,19 @@ export function numberingFit(l: WcoListing, all: EpisodeLike[], workIds: Set<num
       : `${l.count} episodes in season${seasons.length === 1 ? '' : 's'} ${seasons.join(', ')}`,
   };
 }
+
+/**
+ * Which of a show's episodes (Sonarr ids) a pasted episode link is (18 Nov 2026). A link matched by its title wins,
+ * so a link that holds two of Sonarr's episodes picks both; otherwise its number, read the way the show is numbered,
+ * picks the episode the number check already trusts. Empty when neither settles it.
+ */
+export function pickedBy(link: string, all: EpisodeLike[], sources: Map<number, Source>, absolute: boolean): number[] {
+  const bare = (u: string) => String(u ?? '').toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/\/+$/, '');
+  const want = bare(link);
+  const byLink = all.filter((e) => { const s = sources.get(e.id); return s?.kind === 'title' && bare(s.url) === want; }).map((e) => e.id);
+  if (byLink.length) return byLink;
+  const m = /(?:season-(\d+)-)?episode-(\d+)(?:-|$)/.exec(want);
+  if (!m) return [];
+  const season = m[1] ? Number(m[1]) : 1, n = Number(m[2]);
+  return all.filter((e) => sources.get(e.id)?.kind === 'number' && (absolute ? e.abs === n : e.s === season && e.e === n)).map((e) => e.id);
+}

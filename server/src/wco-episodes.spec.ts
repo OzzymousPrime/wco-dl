@@ -1,4 +1,4 @@
-import { alike, buildListing, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, realTitle, resolveSources } from './wco-episodes.util';
+import { alike, buildListing, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, pickedBy, realTitle, resolveSources } from './wco-episodes.util';
 
 const page = (items: string) => `<html><body><div>${items}</div></body></html>`;
 const a = (cls: string, href: string, lang?: string) => `<a class="${cls}" href="${href}"${lang ? ` data-lang="${lang}"` : ''}>x</a>`;
@@ -113,5 +113,45 @@ describe('what wcostream lists', () => {
     expect(l.count).toBe(0);
     expect(isListed(l, { s: 1, e: 1 }, false)).toBe(false);
     expect(latestText(l)).toBe('');
+  });
+});
+
+describe('which episode a pasted link is (18 Nov 2026)', () => {
+  const eps = [
+    { id: 1, s: 1, e: 1, abs: 1, t: 'Pups Make a Splash' }, { id: 2, s: 1, e: 2, abs: 2, t: 'Pups Fall Festival' },
+    { id: 3, s: 1, e: 3, abs: 3, t: 'Pups Save a Train' }, { id: 4, s: 2, e: 1, abs: 4, t: '' },
+  ];
+  it('picks both episodes a two-story link holds, by title', () => {
+    const l = buildListing(['https://www.wcostream.tv/paw-patrol-episode-1-pups-make-a-splash-pups-fall-festival-english-dubbed']);
+    const src = resolveSources(l, eps, false);
+    expect(pickedBy('https://www.wcostream.tv/paw-patrol-episode-1-pups-make-a-splash-pups-fall-festival-english-dubbed', eps, src, false)).toEqual([1, 2]);
+  });
+  it('picks by season and number when there is no title to go on', () => {
+    const l = buildListing(['https://www.wcostream.tv/show-season-2-episode-1-english-dubbed']);
+    const src = resolveSources(l, eps, false);
+    expect(pickedBy('http://www.wcostream.tv/show-season-2-episode-1-english-dubbed/', eps, src, false)).toEqual([4]);
+  });
+  it('picks nothing when the number points at a different episode', () => {
+    const l = buildListing(['https://www.wcostream.tv/show-episode-3-a-totally-different-story-english-dubbed']);
+    const src = resolveSources(l, eps, false);
+    expect(pickedBy('https://www.wcostream.tv/show-episode-3-a-totally-different-story-english-dubbed', eps, src, false)).toEqual([]);
+  });
+});
+
+describe('reading a show page again (18 Nov 2026)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { WcoEpisodesService } = require('./wco-episodes.service');
+  const page = (n: number) => Array.from({ length: n }, (_, i) => `<a class="sonra" href="https://www.wcostream.tv/overgeared-episode-${i + 1}-english-dubbed">Overgeared Episode ${i + 1} English Dubbed</a>`).join('');
+  it('keeps a copy for six hours, but fresh reads the page again and finds the new episode', async () => {
+    let n = 7, reads = 0;
+    const app = { fetchPageHtml: async () => { reads++; return `<div id="sidebar_right3">${page(n)}</div>`; } };
+    const svc = new WcoEpisodesService(app as any);
+    const first = await svc.listing('overgeared', 'dub');
+    n = 8;
+    const kept = await svc.listing('overgeared', 'dub');
+    const again = await svc.listing('overgeared', 'dub', true);
+    expect([first?.count, kept?.count, again?.count, reads]).toEqual([7, 7, 8, 2]);
+    expect(svc.ownerOf('https://www.wcostream.tv/overgeared-episode-8-english-dubbed/')).toBe('overgeared');
+    expect(svc.ownerOf('https://www.wcostream.tv/something-else-episode-1-english-dubbed')).toBeUndefined();
   });
 });

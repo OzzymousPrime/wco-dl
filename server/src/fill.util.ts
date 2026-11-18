@@ -9,6 +9,11 @@
 export interface ShowLink {
   slug: string;
   language?: 'dub' | 'sub';
+  /**
+   * Set when an episode's own link was pasted (18 Nov 2026): the slug is then the show's, guessed from the episode's
+   * name, and `link` is the episode page, which the server can match against the show's listing.
+   */
+  episode?: { link: string; season?: number; number: number };
 }
 
 const WCO_HOST = /^(www\.)?wcostream\.[a-z]+$/i;
@@ -17,10 +22,34 @@ const WCO_HOST = /^(www\.)?wcostream\.[a-z]+$/i;
 /** A wco show name as it appears in its address: letters, digits, hyphens and percent-encoded characters ("ranma-%C2%BD-2024"). */
 export const SLUG = /^[a-z0-9](?:[a-z0-9-]|%[0-9a-f]{2})*$/i;
 
+// An episode's page name: "overgeared-episode-8-english-dubbed", "show-season-2-episode-5-english-subbed".
+const EPISODE_NAME = /^(.+?)-(?:season-(\d+)-)?episode-(\d+)(?:-.*)?$/;
+const EPISODE_LANG = /-english-(dubbed|subbed)$/;
+
+/**
+ * An episode's page name as { slug, season, number, language }, or undefined when it is not one. A bare name counts
+ * only when it ends in "-english-dubbed" or "-english-subbed", so a show whose own name has "episode-2" in it is not
+ * mistaken for an episode; a link's last part counts either way, as show pages live under /anime/.
+ */
+export function episodeName(name: string, fromLink: boolean): { slug: string; season?: number; number: number; language?: 'dub' | 'sub' } | undefined {
+  const lower = name.toLowerCase();
+  const lang = EPISODE_LANG.exec(lower);
+  if (!fromLink && !lang) return undefined;
+  const m = EPISODE_NAME.exec(lower);
+  if (!m) return undefined;
+  return { slug: m[1], season: m[2] ? Number(m[2]) : undefined, number: Number(m[3]),
+    language: lang ? (lang[1] === 'dubbed' ? 'dub' : 'sub') : undefined };
+}
+
 export function parseShowLink(input: string): ShowLink {
   const text = String(input ?? '').trim();
   if (!text) throw new Error('Paste a wcostream show link');
-  if (SLUG.test(text)) return { slug: text.toLowerCase() };
+  if (SLUG.test(text)) {
+    const ep = episodeName(text, false);
+    if (!ep) return { slug: text.toLowerCase() };
+    return { slug: ep.slug, language: ep.language,
+      episode: { link: `https://www.wcostream.tv/${text.toLowerCase()}`, season: ep.season, number: ep.number } };
+  }
   let url: URL;
   try {
     url = new URL(text);
@@ -33,7 +62,13 @@ export function parseShowLink(input: string): ShowLink {
   const slug = (i >= 0 ? parts[i + 1] : parts[parts.length - 1]) ?? '';
   if (!SLUG.test(slug)) throw new Error('No show in that link');
   const lang = url.searchParams.get('lang');
-  return { slug: slug.toLowerCase(), language: lang === 'dub' || lang === 'sub' ? lang : undefined };
+  const language = lang === 'dub' || lang === 'sub' ? lang : undefined;
+  const ep = i < 0 ? episodeName(slug, true) : undefined;
+  if (ep) {
+    return { slug: ep.slug, language: language ?? ep.language,
+      episode: { link: `https://${url.hostname.toLowerCase()}/${slug.toLowerCase()}`, season: ep.season, number: ep.number } };
+  }
+  return { slug: slug.toLowerCase(), language };
 }
 
 /** Lower-case, accents and years dropped, letters and digits only: "Re: ZERO (2016)" -> "rezero". */

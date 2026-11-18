@@ -202,6 +202,19 @@ export class AppController {
     return this.fillService.attention();
   }
 
+  // ---- Old downloads left in staging (18 Nov 2026) ----
+  @Get('fill/staging')
+  async staging() {
+    const { dirs, ...summary } = await this.fillService.staging();
+    return summary;
+  }
+
+  @Post('fill/staging/clear')
+  @UseGuards(JsonRequestGuard)
+  clearStaging() {
+    return this.fillService.clearStaging();
+  }
+
   @Get('sonarr/defaults')
   addDefaults() {
     return this.fillService.addDefaults();

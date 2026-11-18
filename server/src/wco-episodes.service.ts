@@ -46,6 +46,9 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
   }
 
   /** The cached listing, or undefined when it has not been read (or could not be). */
+  /** How reads from wcostream are going; undefined in tests that build the service by hand. */
+  get health() { return this.app?.health; }
+
   peek(slug: string, language: string): WcoListing | undefined {
     const hit = this.cache.get(`${slug}|${language}`);
     return hit && Date.now() - hit.at < TTL_MS ? hit.listing : undefined;
@@ -67,6 +70,7 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
         const html = await this.app.fetchPageHtml(url);
         const listing = buildListing(parseEpisodeLinks(html, url, language));
         if (listing.count > 0) this.parserWorks = true;
+        this.app.health?.record(listing.count > 0 ? 'ok' : 'empty', slug);
         this.cache.set(key, { at: Date.now(), listing });
         this.saveSoon();
         return listing.count === 0 && !this.parserWorks ? undefined : listing;

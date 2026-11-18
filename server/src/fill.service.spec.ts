@@ -332,6 +332,86 @@ describe('FillService worker', () => {
     expect(wco.listing).not.toHaveBeenCalled();
   });
 
+  // 18 Nov 2026: an old episode left out at two checks running goes to Sonarr then, not after four tries.
+  it('hands an old episode wcostream left out twice to Sonarr, once, and believes no list while wcostream is unreadable', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { WcoHealth } = require('./wco-health');
+    const health = new WcoHealth();
+    const wco = { health, listing: jest.fn().mockResolvedValue(buildListing(['https://www.wcostream.tv/catdog-episode-1-english-dubbed'])) };
+    const svc = new FillService({ configDir: path.join(dir, 'config') } as unknown as AppConfig, wco as any);
+    const recent = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const map: any[] = [
+      { id: 100, s: 1, e: 1, st: 'missing', a: '2020-01-01' },
+      { id: 101, s: 1, e: 2, st: 'missing', a: '2020-01-08' },     // aired long ago: handed over at the second check
+      { id: 102, s: 1, e: 3, st: 'missing', a: recent },           // aired this week: the dub may still come
+      { id: 103, s: 1, e: 4, st: 'undub', a: '2020-01-22' },       // has a file already: Sonarr is not asked
+    ];
+    const pref: any = { seriesId: 1, title: 'CatDog', language: 'dub' }, tries: any = {}, handOff: any[] = [];
+    const drop = (p: any, due: number[], t: any) => (svc as any).dropUnlisted('catdog', p, map, due, t, Date.now() + 60000, handOff);
+    await drop(pref, [100, 101, 102, 103], tries);
+    expect(handOff).toEqual([]);                                    // first time left out: not yet
+    await drop(pref, [101, 102, 103], tries);
+    expect(handOff.map((h) => h.eps.map((e: any) => e.id))).toEqual([[101]]);
+    tries[101].handedToSonarr = true; handOff.length = 0;
+    await drop(pref, [101], tries);
+    expect(handOff).toEqual([]);                                    // once only
+
+    for (let i = 0; i < 5; i++) health.record('empty', 'catdog');   // wcostream unreadable: an empty page says nothing
+    const p2: any = { ...pref, unlisted: { ids: [101], at: '' } }, t2: any = {};
+    expect(await drop(p2, [100, 101, 102], t2)).toEqual([100, 101, 102]);
+    expect(p2.unlisted.ids).toEqual([101]); expect(t2).toEqual({}); expect(handOff).toEqual([]);
+  });
+
+  it('asks Sonarr for the handed-over episodes in one search, only while wcostream reads properly', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { WcoHealth } = require('./wco-health');
+    const health = new WcoHealth();
+    const wco = { health, peek: () => undefined, listing: jest.fn().mockResolvedValue(buildListing(['https://www.wcostream.tv/re-zero-season-2-episode-15-english-dubbed'])) };
+    const svc = new FillService((service as any).config, wco as any);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    const leftOut = async () => (svc as any).changePrefs((p: any) => {
+      p['re-zero'].unlisted = { ids: [101], at: '2021-02-01T00:00:00Z' };
+      p['re-zero'].tries = { 101: { n: 1, last: '2021-02-01T00:00:00Z' } };
+    });
+    const searches = () => calls.filter((c) => c.data?.name === 'EpisodeSearch');
+
+    for (let i = 0; i < 5; i++) health.record('error', 'Byparr down');
+    await leftOut();
+    await svc.setPaused(true);                                        // the plan's runs wait, whatever the hour
+    await svc.nightlyPlan();
+    expect(searches()).toEqual([]);                                  // unreadable: nothing handed over...
+    expect((svc as any).jobs.flatMap((j: any) => j.episodes.map((e: any) => e.id))).toContain(101);   // ...it is tried as usual
+
+    (svc as any).jobs = [];
+    health.record('ok');
+    await leftOut();
+    await svc.nightlyPlan();
+    expect(searches().map((c) => c.data.episodeIds)).toEqual([[101]]);
+    expect(calls.find((c) => c.url === 'episode/monitor')!.data).toEqual({ episodeIds: [101], monitored: true });
+    expect((await (svc as any).prefs())['re-zero'].tries[101]).toMatchObject({ n: 2, handedToSonarr: true });
+  });
+
+  it('counts old downloads in staging and deletes only those', async () => {
+    const stage = path.join(dir, 'out', 'wco-gaps', 're-zero-dub');
+    const old = path.join(stage, 'S02E14'), fresh = path.join(stage, 'S02E15');
+    await fs.mkdir(old, { recursive: true }); await fs.mkdir(fresh, { recursive: true });
+    await fs.writeFile(path.join(old, 'Re Zero-S02E14.mp4'), 'x'.repeat(1000));
+    await fs.writeFile(path.join(old, 'downloader.log'), 'log');
+    await fs.writeFile(path.join(fresh, 'Re Zero-S02E15.mp4'), 'x'.repeat(500));
+    const month = new Date(Date.now() - 30 * 86400000);
+    for (const f of ['Re Zero-S02E14.mp4', 'downloader.log']) await fs.utimes(path.join(old, f), month, month);
+
+    const s = await service.staging();
+    expect(s).toMatchObject({ files: 2, bytes: 1500, days: 14, old: { folders: 1, files: 1, bytes: 1000 } });
+    expect(await service.clearStaging()).toEqual({ folders: 1, bytes: 1000 });
+    expect(await fs.readdir(stage)).toEqual(['S02E15']);
+    expect((await service.staging()).old.folders).toBe(0);
+  });
+
   it('a parked overnight run names the next night, not a time outside the window', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { brakeMessage } = require('./fill.service');

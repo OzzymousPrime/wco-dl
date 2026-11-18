@@ -16,6 +16,7 @@ import {
   ContentType,
   parseContentList,
 } from './content-list';
+import { WcoHealth } from './wco-health';
 
 interface ByparrRequest {
   cmd: 'request.get';
@@ -37,6 +38,8 @@ interface ByparrResponse {
 export class AppService {
   private readonly logger = new Logger(AppService.name);
   private readonly inflight = new Map<ContentType, Promise<ContentItem[]>>();
+  /** How reads from wcostream are going (18 Nov 2026): failures here, empty or full pages from the callers. */
+  readonly health = new WcoHealth();
 
   constructor(
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
@@ -88,17 +91,28 @@ export class AppService {
     const items = parseContentList(html);
 
     if (items.length === 0) {
+      this.health.record('empty', `${type} list`);
       throw new BadGatewayException(
         `No titles found on ${listUrl}; the page layout may have changed`,
       );
     }
 
+    this.health.record('ok');
     await this.cacheManager.set(cacheKey, items, CONTENT_LIST_TTL_MS);
     this.logger.log(`Cached ${items.length} ${type} titles`);
     return items;
   }
 
   async fetchPageHtml(url: string): Promise<string> {
+    try {
+      return await this.fetchThroughByparr(url);
+    } catch (error) {
+      this.health.record('error', (error as Error).message);
+      throw error;
+    }
+  }
+
+  private async fetchThroughByparr(url: string): Promise<string> {
     const { byparrUrl, byparrMaxTimeoutMs } = this.config;
     const requestData: ByparrRequest = {
       cmd: 'request.get',

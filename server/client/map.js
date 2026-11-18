@@ -560,11 +560,11 @@
   const when = (s) => new Date(s).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const prog = (p, label, text) => `<div class="prog" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"${text ? ` aria-valuetext="${esc(text)}"` : ''}><i style="width:${p}%"></i></div>`;
   let allRuns = [], queueErr = '', pollT = null, pollSeq = 0;
-  let qstate = { paused: false }, attention = [], attnAt = 0, attnAt0 = false;
+  let qstate = { paused: false }, attention = [], attnAt = 0, attnAt0 = false, stage = null, stageAsk = false;
   async function loadAttention(force) {
     if (!force && Date.now() - attnAt < 60000) return;   // it asks Sonarr, so not on every poll
     attnAt = Date.now();
-    attention = await api('GET', '/attention').catch(() => attention);
+    [attention, stage] = await Promise.all([api('GET', '/attention').catch(() => attention), api('GET', '/fill/staging').catch(() => stage)]);
     UI.setCounts({ attention: attnShown().length });
     renderHome();
     if (location.hash === '#attention' && !attnAt0) { attnAt0 = true; $('attention').scrollIntoView({ block: 'start' }); }
@@ -669,6 +669,9 @@
     // Under the free-space limit (17 Nov 2026) nothing starts, so say why, even with nothing waiting: a Browse download would be refused too.
     const d = qstate.disk;
     if (d && d.low && !cur) return `<div class="runrow stop"><b>Stopped: disk nearly full</b><span class="what">${esc(String(d.freeGb))} GB free where downloads go, under the ${esc(String(d.minGb))} GB limit. ${waiting.length ? wait + '; nothing' : 'Nothing'} starts until there is room, checked every ten minutes</span><span class="grow"></span>${extra}</div>`;
+    // wcostream unreadable (18 Nov 2026): Byparr down, a challenge it cannot pass, or a new page layout.
+    const w = qstate.wco;
+    if (w && !w.ok && !cur) return `<div class="runrow stop"><b>wcostream can't be read</b><span class="what">${esc((w.why || '').replace(/^./, (c) => c.toUpperCase()))}${w.since ? ' (since ' + when(w.since) + ')' : ''}. Until a page reads properly, no episode counts as missing from wcostream</span><span class="grow"></span>${extra}</div>`;
     if (!cur && !waiting.length) return '';
     if (qstate.paused && !cur) return `<div class="runrow"><b>Paused</b><span class="what">${wait}; nothing starts until you press Resume in the queue</span><span class="grow"></span>${extra}</div>`;
     if (cur) {
@@ -842,7 +845,7 @@
     for (const j of allRuns) for (const e of j.episodes) if (ACTIVE.includes(e.state)) {
       const a = act.get(j.seriesId) || { n: 0, cur: null }; a.n++; if (isWorking(e)) a.cur = e; act.set(j.seriesId, a);
     }
-    renderAttention();
+    renderAttention(); renderStage();
     if (!followedLoaded) return;                       // the still grey rows stay until the first answer
     $('followedlist').removeAttribute('aria-busy');
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
@@ -912,6 +915,29 @@
     if (!aall && groups.length > 10) rows.push({ key: 'more', html: `<li class="amore"><button class="linkbtn" data-more type="button">Show all ${groups.length} shows</button></li>` });
     UI.patchList($('attnlist'), rows);
   }
+  // Old downloads in staging: kept or failed episodes leave their file there. Deleting cannot be undone, so it asks twice.
+  function renderStage() {
+    const o = stage?.old, n = o?.folders ?? 0;
+    if (!n) { $('stage').hidden = true; stageAsk = false; return; }
+    const what = `${n} download${n === 1 ? '' : 's'}`, size = (o.bytes / 1024 ** 3).toFixed(1) + ' GB';
+    const html = stageAsk
+      ? `<span>Delete ${what} (${size})? They cannot be brought back, only downloaded again.</span><button class="btn danger" data-s="yes" type="button">Delete ${n}</button><button class="linkbtn" data-s="no" type="button">Keep them</button>`
+      : `<span>Staging holds ${what} untouched for ${stage.days} days and never imported (${size}).</span><button class="btn btn-quiet" data-s="ask" type="button">${UI.icon('x')}Delete them…</button>`;
+    $('stage').hidden = false;
+    if ($('stage').dataset.h !== html) { $('stage').dataset.h = html; $('stage').innerHTML = html; }
+  }
+  $('stage').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-s]'); if (!b) return;
+    if (b.dataset.s !== 'yes') { stageAsk = b.dataset.s === 'ask'; renderStage(); $('stage').querySelector('button')?.focus(); return; }
+    b.disabled = true;
+    try {
+      const r = await api('POST', '/fill/staging/clear', {});
+      toast(`Deleted ${r.folders} old download${r.folders === 1 ? '' : 's'}, ${(r.bytes / 1024 ** 3).toFixed(1)} GB`);
+    } catch (e) { status(`Could not delete the old downloads: ${e.message}`, true); }
+    stageAsk = false;
+    await loadAttention(true);
+    if ($('stage').hidden) $('pagetitle').focus({ preventScroll: true });
+  });
   async function attnLog(key) {
     const [jid, eid] = key.split(':');
     alog.set(key, 'Loading…'); renderAttention();

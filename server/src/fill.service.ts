@@ -31,6 +31,10 @@ import {
 } from './fill.util';
 import { diskState, DiskState, lowDiskMessage } from './disk-space';
 import { WcoEpisodesService } from './wco-episodes.service';
+import { WcoVerdict } from './wco-health';
+
+const WCO_HELD = 'Until it reads again, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 import { fileIsEpisode, fileTitle, latestText, linkTitle, numberingFit, NumberingFit, resolveSources, Source } from './wco-episodes.util';
 
 /**
@@ -145,6 +149,30 @@ const NEW_DUB_DAYS = 21;
 /** Below the free-space limit the queue looks again this often, and says so at most this often. */
 const DISK_RECHECK_MS = 10 * 60 * 1000;
 const DISK_TELL_MS = 12 * 3600 * 1000;
+/** An episode wcostream has not listed at two checks running goes to Sonarr at once if it aired this long ago (18 Nov 2026). */
+export const UNLISTED_HAND_DAYS = 14;
+/** Needs you offers to delete staged downloads untouched for this long. */
+export const STAGE_OLD_DAYS = 14;
+/** "wcostream cannot be read" is sent at most this often. */
+const WCO_TELL_MS = 12 * 3600 * 1000;
+
+/** Files and bytes under a folder, and when anything in it last changed. */
+async function dirStats(dir: string): Promise<{ files: number; bytes: number; newest: number }> {
+  const out = { files: 0, bytes: 0, newest: 0 };
+  for (const f of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const p = path.join(dir, f.name);
+    if (f.isDirectory()) {
+      const d = await dirStats(p);
+      out.files += d.files; out.bytes += d.bytes; out.newest = Math.max(out.newest, d.newest);
+      continue;
+    }
+    const st = await fs.stat(p).catch(() => undefined);
+    if (!st) continue;
+    out.newest = Math.max(out.newest, st.mtimeMs);
+    if (f.name !== 'downloader.log') { out.files++; out.bytes += st.size; }
+  }
+  return out;
+}
 
 @Injectable()
 export class FillService implements OnApplicationBootstrap {
@@ -205,13 +233,41 @@ export class FillService implements OnApplicationBootstrap {
     } catch { this.jobs = []; }
     try { this.paused = !!JSON.parse(await fs.readFile(this.stateFile, 'utf8')).paused; } catch { this.paused = false; }
     try { this.applySettings(cleanSettings(JSON.parse(await fs.readFile(this.settingsFile, 'utf8')))); } catch { /* defaults */ }
+    const health = this.wco?.health;
+    if (health) health.onChange = (v) => void this.tellWco(v).catch((e) => this.logger.warn(`wcostream message failed: ${(e as Error).message}`));
     void this.pump();
   }
 
   // ---------- Queue controls ----------
   async queueState() {
     const disk = await this.checkDisk();
-    return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget, disk };
+    return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget, disk, wco: this.wcoVerdict() };
+  }
+
+  // ---------- wcostream unreadable (18 Nov 2026) ----------
+  // Byparr down, a challenge it cannot pass, or a new page layout all look the same from here: pages that fail or
+  // come back empty. Until one reads properly, no episode counts as "not listed", none is handed to Sonarr for it,
+  // and a message says so: during the day at once, after a night in the morning summary (or at 10:00).
+  private wcoToldAt = 0;
+  private wcoTold = false;
+  private wcoPending = false;
+  private wcoVerdict(): WcoVerdict { return this.wco?.health?.verdict() ?? { ok: true }; }
+  private async tellWco(v: WcoVerdict) {
+    const url = this.config.publicUrl ? `${this.config.publicUrl}/map.html` : undefined;
+    if (v.ok) {
+      this.wcoPending = false;
+      this.logger.log('wcostream reads again');
+      if (!this.wcoTold) return;
+      this.wcoTold = false;
+      if (isNight()) { this.nightNotes.push('wcostream reads again.'); return; }
+      await this.push('wco-dl: wcostream reads again', 'Pages from wcostream have episodes on them again; nothing else to do.', url);
+      return;
+    }
+    this.logger.warn(`wcostream cannot be read: ${v.why}`);
+    if (isNight()) { this.wcoPending = true; return; }
+    if (Date.now() - this.wcoToldAt < WCO_TELL_MS) return;
+    this.wcoToldAt = Date.now(); this.wcoTold = true; this.wcoPending = false;
+    await this.push('wco-dl: wcostream cannot be read', `${v.why![0].toUpperCase() + v.why!.slice(1)}.\n${WCO_HELD}`, url);
   }
 
   // ---------- Free space (17 Nov 2026) ----------
@@ -732,7 +788,8 @@ export class FillService implements OnApplicationBootstrap {
     // downloaded file's own title is checked before it is imported.
     let source: Source = { kind: 'number' };
     let importIds = [ep.id];
-    const listing = this.wco ? await this.wco.listing(job.slug, job.language ?? 'dub') : undefined;
+    const read = this.wco ? await this.wco.listing(job.slug, job.language ?? 'dub') : undefined;
+    const listing = read && this.wcoVerdict().ok ? read : undefined;
     if (listing) {
       try {
         const map = await this.mapEpisodes(job.seriesId);
@@ -876,9 +933,11 @@ export class FillService implements OnApplicationBootstrap {
   /** ffprobe's view of a downloaded file (a method, so tests with a fake downloader can stand in for it). */
   private probe(file: string) { return probeFile(file); }
 
-  private async premiumToSonarr(ep: FillEpisode) {
-    await this.sonarr('put', 'episode/monitor', { episodeIds: [ep.id], monitored: true });
-    await this.sonarr('post', 'command', { name: 'EpisodeSearch', episodeIds: [ep.id] });
+  private premiumToSonarr(ep: FillEpisode) { return this.handToSonarr([ep.id]); }
+  /** Monitor the episodes in Sonarr and ask it to search for them: one call each, however many. */
+  private async handToSonarr(ids: number[]) {
+    await this.sonarr('put', 'episode/monitor', { episodeIds: ids, monitored: true });
+    await this.sonarr('post', 'command', { name: 'EpisodeSearch', episodeIds: ids });
   }
 
   // ---------- Following and the nightly plan ----------
@@ -1047,6 +1106,7 @@ export class FillService implements OnApplicationBootstrap {
     // first, so new weekly episodes and nearly complete shows are not stuck behind a 200-episode backlog.
     const plans: { slug: string; pref: ShowPref; due: number[] }[] = [];
     const deadline = Date.now() + 30 * 60 * 1000;      // reading wcostream's lists must not eat the night
+    const handOff: { slug: string; pref: ShowPref; eps: MapEpisode[] }[] = [];
     for (const [slug, pref] of Object.entries(prefs).filter(([, p]) => p.follow)) {
       try {
         const map = await this.mapEpisodes(pref.seriesId);
@@ -1060,15 +1120,27 @@ export class FillService implements OnApplicationBootstrap {
           const verdict = retryDue(e.a, tries[e.id]);
           if (verdict === 'due') due.push(e.id);
           else if (verdict === 'give-up' && !tries[e.id]?.handedToSonarr && e.st === 'missing') {
-            await this.premiumToSonarr({ id: e.id } as FillEpisode);
+            await this.handToSonarr([e.id]);
             tries[e.id] = { ...tries[e.id]!, handedToSonarr: true };
             this.nightNotes.push(`${pref.title ?? slug} ${e.s}x${pad(e.e)}: tried ${RETRY_DAYS.length} times, handed to Sonarr`);
           }
         }
-        const kept = await this.dropUnlisted(slug, pref, map, due, tries, deadline);
+        const kept = await this.dropUnlisted(slug, pref, map, due, tries, deadline, handOff);
         if (kept.length) plans.push({ slug, pref, due: kept });
       } catch (err) {
         this.logger.warn(`Nightly plan for ${slug}: ${(err as Error).message}`);
+      }
+    }
+    // Only when wcostream read properly all through the plan: a page that broke halfway must not hand a library over.
+    if (this.wcoVerdict().ok) for (const { slug, pref, eps } of handOff) {
+      try {
+        await this.handToSonarr(eps.map((e) => e.id));
+        for (const e of eps) pref.tries![e.id] = { ...pref.tries![e.id], handedToSonarr: true };
+        const codes = eps.map((e) => `${e.s}x${pad(e.e)}`);
+        this.nightNotes.push(`${pref.title ?? slug} ${codes.length <= 4 ? codes.join(', ') : `${codes.length} episodes, ${codes[0]} to ${codes[codes.length - 1]}`}: ` +
+          `not on wcostream at two checks running, aired over ${UNLISTED_HAND_DAYS} days ago, handed to Sonarr`);
+      } catch (err) {
+        this.logger.warn(`Handing ${slug} to Sonarr: ${(err as Error).message}`);
       }
     }
     plans.sort((a, b) => a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
@@ -1104,17 +1176,24 @@ export class FillService implements OnApplicationBootstrap {
   /**
    * Take out of tonight's list the episodes wcostream does not list for this show (12 Nov 2026: 33 of the first night's
    * 47 failures were "list index out of range", an episode the site does not have under that number). They count as a
-   * try, so after the usual four the episode is handed to Sonarr to search for. Unknown (a failed read) never drops anything.
+   * try, so after the usual four the episode is handed to Sonarr to search for. Unknown (a failed read, or wcostream
+   * unreadable) never drops anything. An episode that aired over UNLISTED_HAND_DAYS ago and was not listed at the check
+   * before either is unlikely to appear: it goes on the hand-off list for Sonarr now (18 Nov 2026), not after four tries.
    */
-  private async dropUnlisted(slug: string, pref: ShowPref, map: MapEpisode[], due: number[], tries: NonNullable<ShowPref['tries']>, deadline: number): Promise<number[]> {
+  private async dropUnlisted(slug: string, pref: ShowPref, map: MapEpisode[], due: number[], tries: NonNullable<ShowPref['tries']>,
+    deadline: number, handOff: { slug: string; pref: ShowPref; eps: MapEpisode[] }[] = []): Promise<number[]> {
     if (!due.length) { delete pref.unlisted; return due; }
     if (!this.wco || Date.now() > deadline) return due;
     const listing = await this.wco.listing(slug, pref.language ?? 'dub');
-    if (!listing) return due;
+    if (!listing || !this.wcoVerdict().ok) return due;
     const sources = resolveSources(listing, map, !!pref.absolute);
     const gone = due.filter((id) => sources.get(id)?.kind === 'none');
     if (!gone.length) { delete pref.unlisted; return due; }
     const now = new Date().toISOString();
+    const before = new Set(pref.unlisted?.ids ?? []);
+    const oldBefore = new Date(Date.now() - UNLISTED_HAND_DAYS * 86400000).toISOString().slice(0, 10);
+    const hand = map.filter((e) => gone.includes(e.id) && before.has(e.id) && e.st === 'missing' && e.a && e.a <= oldBefore && !tries[e.id]?.handedToSonarr);
+    if (hand.length) handOff.push({ slug, pref, eps: hand });
     for (const id of gone) tries[id] = { ...tries[id], n: (tries[id]?.n ?? 0) + 1, last: now };
     pref.unlisted = { ids: gone, at: now };
     this.logger.log(`${pref.title ?? slug}: ${gone.length} episode(s) not listed on wcostream, left out`);
@@ -1141,7 +1220,7 @@ export class FillService implements OnApplicationBootstrap {
               const listing = work.size ? await this.wco!.listing(slug, pref.language ?? 'dub') : undefined;
               await this.changePrefs((fresh) => {
                 if (!fresh[slug]) return;
-                if (listing) fresh[slug].numbering = { ...numberingFit(listing, map, work, !!fresh[slug].absolute), at: new Date().toISOString() };
+                if (listing && this.wcoVerdict().ok) fresh[slug].numbering = { ...numberingFit(listing, map, work, !!fresh[slug].absolute), at: new Date().toISOString() };
                 else if (!work.size) delete fresh[slug].numbering;
               });
             }
@@ -1172,7 +1251,7 @@ export class FillService implements OnApplicationBootstrap {
     const language = langParam === 'sub' || langParam === 'dub' ? langParam : prefs[parsed.slug]?.language ?? 'dub';
     const absolute = absoluteParam !== undefined ? absoluteParam === 'true' : !!prefs[parsed.slug]?.absolute;
     const listing = await this.wco.listing(parsed.slug, language);
-    if (!listing) return none;
+    if (!listing || !this.wcoVerdict().ok) return none;
     const map = await this.mapEpisodes(seriesId);
     const sources = resolveSources(listing, map, absolute);
     const work = map.filter((e) => e.st === 'missing' || e.st === 'undub' || e.st === 'unknown');
@@ -1261,7 +1340,11 @@ export class FillService implements OnApplicationBootstrap {
       (this.nightNotes.length ? '\n' + this.nightNotes.splice(0).slice(0, 5).join('\n') : '') +
       (await this.attention().then((a) => (a.length ? `\n${a.length} need you: open the link.` : ''), () => ''));
     const disk = await this.checkDisk();
-    const text = body + (disk.low ? `\n${lowDiskMessage(disk)}.` : '');
+    const wco = this.wcoVerdict();
+    if (!wco.ok) { this.wcoToldAt = Date.now(); this.wcoTold = true; this.wcoPending = false; }
+    const stage = await this.staging().catch(() => undefined);
+    const text = body + (disk.low ? `\n${lowDiskMessage(disk)}.` : '') + (wco.ok ? '' : `\nwcostream cannot be read: ${wco.why}. ${WCO_HELD}`) +
+      (stage?.old.files ? `\n${stage.old.folders} downloads in staging untouched for ${STAGE_OLD_DAYS} days (${gb(stage.old.bytes)}): delete them on Needs you.` : '');
     this.logger.log(text.replace(/\n/g, ' | '));
     await this.push('wco-dl overnight', text, publicUrl ? `${publicUrl}/map.html#attention` : undefined);
   }
@@ -1279,6 +1362,11 @@ export class FillService implements OnApplicationBootstrap {
   @Cron('0 10,14,18,22 * * *')
   async newDubsCron() {
     if (isNight()) return;
+    if (this.wcoPending) {      // went unreadable in the night and no summary said so
+      const v = this.wcoVerdict();
+      this.wcoPending = false;
+      if (!v.ok) await this.tellWco(v).catch((e) => this.logger.warn(`wcostream message failed: ${(e as Error).message}`));
+    }
     await this.checkNewDubs().catch((e) => this.logger.warn(`New-dub check: ${(e as Error).message}`));
   }
 
@@ -1339,6 +1427,47 @@ export class FillService implements OnApplicationBootstrap {
     const text = await fs.readFile(path.join(this.stageDir(job, ep), 'downloader.log'), 'utf8').catch(() => '');
     const lines = text.split(/\r?\n|\r/).filter((l) => l.trim() && !/^DEBUG|confidence =/.test(l));
     return lines.slice(-150).join('\n') || 'No downloader output was kept for this episode.';
+  }
+
+  // ---------- Staging (18 Nov 2026) ----------
+  /**
+   * Downloads left in staging by kept and failed episodes, one folder per show and episode. "Old" folders were last
+   * touched over STAGE_OLD_DAYS ago and belong to no episode waiting or running; Needs you offers to delete them.
+   * A kept file is not imported for a reason (wrong episode, not a dub, will not play), so it is rarely wanted later.
+   */
+  async staging(now = Date.now()) {
+    const root = path.join(this.config.outputBase, 'wco-gaps');
+    const busy = this.busyStageDirs();
+    const all = { files: 0, bytes: 0 }, old = { folders: 0, files: 0, bytes: 0 }, dirs: string[] = [];
+    for (const show of await fs.readdir(root, { withFileTypes: true }).catch(() => [])) {
+      if (!show.isDirectory()) continue;
+      for (const e of await fs.readdir(path.join(root, show.name), { withFileTypes: true }).catch(() => [])) {
+        if (!e.isDirectory()) continue;
+        const dir = path.join(root, show.name, e.name), st = await dirStats(dir);
+        all.files += st.files; all.bytes += st.bytes;
+        if (busy.has(dir) || now - (st.newest || 0) < STAGE_OLD_DAYS * 86400000) continue;
+        old.folders++; old.files += st.files; old.bytes += st.bytes; dirs.push(dir);
+      }
+    }
+    return { ...all, days: STAGE_OLD_DAYS, old, dirs };
+  }
+
+  /** Delete the old folders in staging; an episode queued meanwhile keeps its own. */
+  async clearStaging() {
+    const s = await this.staging();
+    let folders = 0, bytes = 0;
+    for (const dir of s.dirs) {
+      if (this.busyStageDirs().has(dir)) continue;
+      const st = await dirStats(dir);
+      try { await fs.rm(dir, { recursive: true, force: true }); folders++; bytes += st.bytes; } catch { /* in use: left */ }
+      await fs.rmdir(path.dirname(dir)).catch(() => undefined);     // only when the show's folder is now empty
+    }
+    this.logger.log(`Staging: deleted ${folders} old download folder(s), ${gb(bytes)}`);
+    return { folders, bytes };
+  }
+
+  private busyStageDirs() {
+    return new Set(this.jobs.flatMap((j) => j.episodes.filter((e) => ['queued', 'downloading', 'importing'].includes(e.state)).map((e) => this.stageDir(j, e))));
   }
 
   private stageDir(job: FillJob, ep: FillEpisode) {

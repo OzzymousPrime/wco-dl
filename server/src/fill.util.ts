@@ -98,8 +98,9 @@ export function matchSeries<T extends SeriesLike>(slug: string, series: T[]): T[
   try { name = decodeURIComponent(slug); } catch { /* keep it as written */ }
   const want = normaliseTitle(name.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
   if (!want) return [];
-  const keys = (s: T) =>
-    [s.title, s.titleSlug ?? '', ...(s.alternateTitles ?? []).map((a) => a.title)].map(normaliseTitle).filter(Boolean);
+  // Each name also without its "&": a link drops it ("welsh-shedar" is "Welsh & Shedar"; 19 Nov 2026 it was flagged).
+  const keys = (s: T) => [s.title, s.titleSlug ?? '', ...(s.alternateTitles ?? []).map((a) => a.title)]
+    .flatMap((t) => [t, t.replace(/&/g, ' ')]).map(normaliseTitle).filter(Boolean);
   const exact = series.filter((s) => keys(s).includes(want));
   if (exact.length) return exact;
   return series

@@ -58,6 +58,10 @@ describe('matchSeries', () => {
     expect(matchSeries('ranma-%c2%bd-2024', [{ id: 1, title: 'Ranma ½ (2024)' }]).map((s) => s.id)).toEqual([1]);
     expect(matchSeries('bad-%zz-name', [{ id: 2, title: 'Bad Zz Name' }]).map((s) => s.id)).toEqual([2]);   // not decodable: read as written
   });
+  it('matches a link that dropped the "&" (19 Nov 2026: Welsh & Shedar was flagged as another show)', () => {
+    expect(matchSeries('welsh-shedar', [{ id: 3, title: 'Welsh & Shedar' }]).map((s) => s.id)).toEqual([3]);
+    expect(matchSeries('welsh-and-shedar', [{ id: 3, title: 'Welsh & Shedar' }]).map((s) => s.id)).toEqual([3]);
+  });
   it('returns every candidate when two shows share a name', () => {
     expect(matchSeries('one-piece', series).map((s) => s.id).sort()).toEqual([4039, 9]);
   });

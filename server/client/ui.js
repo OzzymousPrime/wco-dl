@@ -230,6 +230,7 @@
       { id: 'retry', icon: () => 'retry', title: () => 'Retry everything that failed', words: 'retry everything that failed' },
       { id: 'fillnow', icon: () => 'download', title: () => 'Fill the followed shows now', words: 'fill the followed shows now gaps run tonight plan' },
       { id: 'recount', icon: () => 'retry', title: () => 'Check Sonarr for changes', words: 'check sonarr for changes recount count followed' },
+      { id: 'checklinks', icon: () => 'search', title: () => "Check every followed show's link", words: 'check every followed show link links wrong wcostream count' },
       { id: 'stage', icon: () => 'x', title: () => `Delete old downloads in staging (${oldStage})…`, words: 'delete old downloads in staging clear space', when: () => oldStage > 0 },
       { id: 'library', icon: () => 'chev', title: () => 'Open Library gaps', words: 'open library gaps' },
       { id: 'calendar', icon: () => 'chev', title: () => 'Open Dub calendar', words: 'open dub calendar' },
@@ -268,6 +269,15 @@
         try { const r = await postJSON('/followed/recount'); mine = null; UI.toast(`Counted ${r.counted} shows`); } catch (e) { UI.toast(`Could not count: ${e.message}`); }
       },
       stage: () => (UI.hooks.stage ? UI.hooks.stage() : go('/map.html#stage')),
+      // Every followed show's link and wcostream count, checked behind the screen (19 Nov 2026). Nothing is queued.
+      checklinks: async () => {
+        try {
+          const r = await postJSON('/followed/check-links');
+          UI.toast(r.started ? "Checking every followed show's link on wcostream. This takes a while; a wrong one appears on Home"
+            : r.total ? 'The links are being checked already' : 'wcostream cannot be read from here, so the links cannot be checked');
+          if (UI.hooks.linksStarted) UI.hooks.linksStarted();
+        } catch (e) { UI.toast(`Could not start the check: ${e.message}`); }
+      },
       library: () => go('/library.html'),
       calendar: () => go('/calendar.html'),
       queue: () => (UI.hooks.queue ? UI.hooks.queue() : go('/map.html#queue')),

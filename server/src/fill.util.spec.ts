@@ -54,6 +54,10 @@ describe('matchSeries', () => {
     expect(matchSeries('re-zero-starting-life-in-another-world', series).map((s) => s.id)).toEqual([575]);
     expect(matchSeries('mystery-diners', series).map((s) => s.id)).toEqual([7]);
   });
+  it('reads a percent-encoded link name (19 Nov 2026: Ranma ½ was flagged as another show)', () => {
+    expect(matchSeries('ranma-%c2%bd-2024', [{ id: 1, title: 'Ranma ½ (2024)' }]).map((s) => s.id)).toEqual([1]);
+    expect(matchSeries('bad-%zz-name', [{ id: 2, title: 'Bad Zz Name' }]).map((s) => s.id)).toEqual([2]);   // not decodable: read as written
+  });
   it('returns every candidate when two shows share a name', () => {
     expect(matchSeries('one-piece', series).map((s) => s.id).sort()).toEqual([4039, 9]);
   });

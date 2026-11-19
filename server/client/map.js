@@ -655,6 +655,7 @@
     if ($('pausebtn').dataset.l !== pauseLabel) { $('pausebtn').dataset.l = pauseLabel; $('pausebtn').innerHTML = UI.icon(qstate.paused ? 'play' : 'pause') + pauseLabel; }
     $('pausebtn').setAttribute('aria-pressed', String(!!qstate.paused));
     UI.setPaused(qstate.paused);
+    renderLinkCheck();
     loadAttention();
     applyRuns(); renderQueue(); renderHome();
     if (wasActive && !showActive() && !queueErr) {
@@ -1018,6 +1019,23 @@
     catch (e) { status(`Could not keep the link: ${e.message}`, true); b.disabled = false; }
   });
 
+  // Why episodes failed, as the server names them (19 Nov 2026).
+  const KIND_WORDS = { refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
+    misnamed: 'named as another episode', 'not-dub': 'not a dub', unplayable: 'would not play or too short', stalled: 'stalled', other: 'other' };
+  const KIND_SHORT = { refused: 'refused', 'no-player': 'no player', unlisted: 'not listed', misnamed: 'misnamed', 'not-dub': 'not a dub', unplayable: 'would not play', stalled: 'stalled', other: 'other' };
+
+  // "Check every link" (19 Nov 2026): while it runs the followed list's heading says how far it has got; when it ends
+  // the list is asked for again, so a show linked to another show appears under "Linked to the wrong show?".
+  let linksWere = false;
+  function renderLinkCheck() {
+    const l = qstate.links;
+    $('flinks').hidden = !l;
+    if (l) $('flinks').textContent = ` · checking links on wcostream: ${l.done} of ${l.total}${l.wrong ? `, ${l.wrong} look wrong` : ''}`;
+    if (linksWere && !l) loadFollowed();
+    linksWere = !!l;
+  }
+  UI.hooks.linksStarted = () => { linksWere = true; poll(); };
+
   // Last night (18 Nov 2026): what the automatic runs did, as the phone message said it, with a link to each show.
   // Shown for a day and a half after the runs finished; the phone message links here (#night) and opens it.
   function renderNight() {
@@ -1028,12 +1046,16 @@
     const hm = (s) => new Date(s).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const today = new Date(r.at).toDateString() === new Date().toDateString();
     const head = r.kind === 'now' ? 'Fill now' : today ? 'Last night' : 'Overnight, ' + new Date(r.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    const extra = r.shows.length + r.notes.length;
+    const extra = r.shows.length + r.notes.length + Object.keys(r.reasons || {}).length + (r.waiting || 0);
     const sum = `<b>${esc(head)}</b><span class="meta">${hm(r.from)} to ${hm(r.at)}</span><span class="what">${said.length ? esc(said.join(', ')) : 'Nothing new came in'}</span>` +
-      (extra ? `<span class="more">${r.shows.length ? `${r.shows.length} show${r.shows.length === 1 ? '' : 's'}` : 'Notes'}${UI.icon('chev')}</span>` : '');
-    const word = (x) => [x.filled && `${x.filled} filled`, x.swapped && `${x.swapped} swapped`, x.premium && `${x.premium} to Sonarr`, x.kept && `${x.kept} to check`, x.failed && `<span class="gapmark">${x.failed} failed</span>`].filter(Boolean).join(' · ');
+      (extra ? `<span class="more">${r.shows.length ? `${r.shows.length} show${r.shows.length === 1 ? '' : 's'}` : 'Details'}${UI.icon('chev')}</span>` : '');
+    const top = (why) => Object.entries(why || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const word = (x) => [x.filled && `${x.filled} filled`, x.swapped && `${x.swapped} swapped`, x.premium && `${x.premium} to Sonarr`, x.kept && `${x.kept} to check`,
+      x.failed && `<span class="gapmark">${x.failed} failed${top(x.why) ? ` (${esc(KIND_SHORT[top(x.why)] || top(x.why))})` : ''}</span>`].filter(Boolean).join(' · ');
+    const why = Object.entries(r.reasons || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${KIND_WORDS[k] || k}`);
     const body = (r.shows.length ? `<ul class="flist">${r.shows.map((x) => `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}">${UI.poster(x.seriesId, x.title)}` +
       `<span class="ft"><span class="fname">${esc(x.title)}</span><span class="fmeta">${word(x)}</span></span></a></li>`).join('')}</ul>` : '') +
+      (why.length || r.waiting ? `<p class="why">${why.length ? `Why: ${esc(why.join(', '))}.` : ''}${r.waiting ? ` ${r.waiting} wait for the next night (parked after the video server refused them).` : ''}</p>` : '') +
       (r.notes.length ? `<ul class="notes">${r.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
     $('night').hidden = false;
     $('nightsum').tabIndex = extra ? 0 : -1;

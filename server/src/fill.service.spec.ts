@@ -479,6 +479,64 @@ describe('FillService worker', () => {
     expect(mayRun({ ...made[0], auto: false, now: undefined })).toBe(true);
   });
 
+  // 19 Nov 2026: refused shows were parked past 07:00, the night's runs never all finished, and no summary was written.
+  it('tells the night at its close with parked episodes waiting, and tells each of them once when it finishes', async () => {
+    const svc = new FillService((service as any).config);
+    const push = jest.fn().mockResolvedValue(undefined);
+    Object.assign(svc as any, { push, attention: async () => [], staging: async () => ({ old: { files: 0 } }), checkDisk: async () => ({ low: false }) });
+    const at = new Date(Date.now() - 3600000).toISOString();
+    const refused = "Not downloaded: wcostream's video server returned HTTP 404 (text/html) instead of a video.";
+    const job: any = { id: 'n1', seriesId: 1, title: 'Hercules', slug: 'hercules', quality: '1080', absolute: false, createdAt: at, auto: true, episodes: [
+      { id: 1, s: 1, e: 1, title: 'a', mode: 'missing', state: 'done' },
+      { id: 2, s: 1, e: 2, title: 'b', mode: 'missing', state: 'failed', message: refused },
+      { id: 3, s: 1, e: 3, title: 'c', mode: 'missing', state: 'queued' },
+    ] };
+    (svc as any).jobs = [job];
+    await (svc as any).notifyNight();
+    let r = (await svc.getLastRun())!;
+    expect(r).toMatchObject({ tally: { filled: 1, failed: 1 }, waiting: 1, reasons: { refused: 1 } });
+    expect(r.shows[0].why).toEqual({ refused: 1 });
+    expect(push.mock.calls[0][1]).toMatch(/Why: 1 refused by the video server\.\n1 wait for the next night/);
+    job.episodes[2].state = 'done';                                   // the parked one, the next night
+    await (svc as any).notifyNight();
+    r = (await svc.getLastRun())!;
+    expect(r).toMatchObject({ tally: { filled: 1, failed: 0 }, waiting: 0 });
+  });
+
+  it('names why an episode failed, in a word', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { failureKind } = require('./fill.service');
+    expect(failureKind("Not downloaded: wcostream's video server returned HTTP 404 (text/html) instead of a video.")).toBe('refused');
+    expect(failureKind('Not downloaded: Could not find a video for x: No video player iframe found on x')).toBe('no-player');
+    expect(failureKind('Not downloaded: wcostream does not list this episode under this season and number')).toBe('unlisted');
+    expect(failureKind('Downloaded Happy The Hoglet-S01E01-0.mp4, which is not 1x10; left in staging')).toBe('misnamed');
+    expect(failureKind('The download stalled (no output for a while)')).toBe('stalled');
+  });
+
+  it('checks every followed show\'s link behind the screen, flags another show, and queues nothing', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const wco = { peek: () => undefined, listing: jest.fn().mockResolvedValue(buildListing([14, 15, 16].map((n) => `https://www.wcostream.tv/konosuba-season-2-episode-${n}-english-dubbed`))) };
+    const svc = new FillService((service as any).config, wco as any);
+    (svc as any).seriesCache = { at: Date.now(), list: [{ id: 575, title: 'Re: ZERO', titleSlug: 're-zero' }] };
+    await (svc as any).changePrefs((p: any) => { p.konosuba = { seriesId: 575, title: 'Re: ZERO', follow: true, language: 'dub' }; });
+    expect(svc.checkLinks()).toMatchObject({ started: true });
+    await (svc as any).linkQueue;
+    const prefs = await (svc as any).prefs();
+    expect(prefs.konosuba.linkWrong.why).toMatch(/name on wcostream is not one of the show's names/);
+    expect((svc as any).jobs).toEqual([]);
+    expect(svc.linkProgress()).toBeUndefined();                        // finished
+  });
+
+  it('keeps a line per finished attempt, with why it failed', async () => {
+    await (service as any).logAttempt({ slug: 're-zero', title: 'Re: ZERO', seriesId: 575, auto: true },
+      { id: 101, s: 2, e: 14, mode: 'missing', state: 'failed', message: "Not downloaded: wcostream's video server returned HTTP 404 (text/html) instead of a video." });
+    await (service as any).logAttempt({ slug: 're-zero', title: 'Re: ZERO', seriesId: 575 }, { id: 102, s: 2, e: 15, mode: 'swap', state: 'queued' });
+    const lines = (await fs.readFile(path.join((service as any).config.configDir, 'fill-attempts.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toMatchObject({ slug: 're-zero', id: 101, state: 'failed', kind: 'refused', auto: true });
+  });
+
   it('keeps the summary of the automatic runs, sends only an overnight one, and never counts a run twice', async () => {
     const svc = new FillService((service as any).config);
     const push = jest.fn().mockResolvedValue(undefined);

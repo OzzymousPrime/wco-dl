@@ -162,6 +162,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .night .nbody{padding:0 16px 12px}
 .night .flist{columns:300px}
 .night .notes{margin:8px 0 0;padding-left:18px;color:var(--text-2);font-size:13px}
+.night .why{margin:8px 0 0;color:var(--text-2);font-size:13px;overflow-wrap:anywhere}
 .night .notes li{margin:2px 0;overflow-wrap:anywhere}
 .runrow .what{color:var(--text-2);min-width:0;overflow-wrap:anywhere}
 .runrow .meta{color:var(--text-2);font-size:13px}

@@ -157,6 +157,13 @@ export class AppController {
   }
 
   /** "The link is right" (18 Nov 2026): the nightly link check leaves this show's link alone from now on. */
+  /** "Check every link" (19 Nov 2026): every followed show's link and wcostream count, checked behind the screen. */
+  @Post('followed/check-links')
+  @UseGuards(JsonRequestGuard)
+  checkLinks() {
+    return this.fillService.checkLinks();
+  }
+
   @Post('links/ok')
   @UseGuards(JsonRequestGuard)
   linkOk(@Body() body: any) {

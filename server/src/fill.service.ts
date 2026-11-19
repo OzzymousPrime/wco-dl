@@ -85,6 +85,8 @@ export interface FillJob {
   now?: boolean;
   /** Episodes in a row that wcostream's video server refused (see VIDEO_REFUSED). */
   refused?: number;
+  /** Episodes a run summary has already counted (19 Nov 2026), so an episode parked past the night is told once, later. */
+  told?: number[];
 }
 
 /** Episodes to hand to Sonarr tonight, with the reason for the summary. `unlisted`: only while wcostream reads properly. */
@@ -97,31 +99,55 @@ export function newestIds(groups: { id: number; a?: string }[][], cap: number): 
 
 /** What a set of automatic runs did, in all and per show. */
 export interface RunTally { filled: number; swapped: number; premium: number; kept: number; failed: number }
+/** Why an episode failed or was kept, in a word (19 Nov 2026): for the summary, the attempt log and the next review. */
+export type FailureKind = 'refused' | 'no-player' | 'unlisted' | 'misnamed' | 'not-dub' | 'unplayable' | 'stalled' | 'other';
+export function failureKind(message = ''): FailureKind {
+  if (VIDEO_REFUSED.test(message)) return 'refused';
+  if (NO_PLAYER.test(message)) return 'no-player';
+  if (NOT_LISTED.test(message)) return 'unlisted';
+  if (/which is not \d+x\d+|a different episode/i.test(message)) return 'misnamed';
+  if (/Not a dub/i.test(message)) return 'not-dub';
+  if (/would not open|no video|runs \d+ minutes/i.test(message)) return 'unplayable';
+  if (/stalled/i.test(message)) return 'stalled';
+  return 'other';
+}
 /**
  * The summary of the last automatic runs (18 Nov 2026), kept for the home screen's "Last night" card, because the
  * phone message is gone once it is swiped away. `kind` is 'now' when every run in it came from "Fill now".
  */
 export interface LastRun {
   at: string; from: string; kind: 'night' | 'now'; tally: RunTally;
-  shows: ({ slug: string; title: string; seriesId: number } & RunTally)[];
+  shows: ({ slug: string; title: string; seriesId: number; why?: Partial<Record<FailureKind, number>> } & RunTally)[];
   notes: string[]; attention: number;
+  /** Why episodes failed or were kept, by kind; and how many were still waiting (parked past the night) when told. */
+  reasons?: Partial<Record<FailureKind, number>>; waiting?: number;
 }
 /** Count what runs did, in all and per show (a show with two runs is one row), shows by name. */
-export function tallyRuns(runs: FillJob[]): { tally: RunTally; shows: LastRun['shows'] } {
+/** Count what runs did, in all and per show (a show with two runs is one row), shows by name. `skip`: episodes already told. */
+export function tallyRuns(runs: FillJob[], skip: (j: FillJob, id: number) => boolean = () => false):
+  { tally: RunTally; shows: LastRun['shows']; reasons: Partial<Record<FailureKind, number>>; waiting: number } {
   const zero = (): RunTally => ({ filled: 0, swapped: 0, premium: 0, kept: 0, failed: 0 });
-  const tally = zero(), by = new Map<number, LastRun['shows'][number]>();
+  const tally = zero(), by = new Map<number, LastRun['shows'][number]>(), reasons: Partial<Record<FailureKind, number>> = {};
+  let waiting = 0;
   for (const j of runs) {
     const row = by.get(j.seriesId) ?? { slug: j.slug, title: j.title, seriesId: j.seriesId, ...zero() };
     for (const e of j.episodes) {
+      if (e.state === 'queued') { waiting++; continue; }
+      if (skip(j, e.id)) continue;
       const k: keyof RunTally | undefined = e.state === 'done' ? (e.mode === 'swap' ? 'swapped' : 'filled')
         : e.state === 'premium' ? 'premium' : e.state === 'kept' ? 'kept' : e.state === 'failed' ? 'failed' : undefined;
       if (k) { row[k]++; tally[k]++; }
+      if (k === 'failed' || k === 'kept') {
+        const why = failureKind(e.message);
+        reasons[why] = (reasons[why] ?? 0) + 1;
+        (row.why ??= {})[why] = (row.why[why] ?? 0) + 1;
+      }
     }
     by.set(j.seriesId, row);
   }
   const shows = [...by.values()].filter((r) => r.filled + r.swapped + r.premium + r.kept + r.failed > 0)
     .sort((a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }));
-  return { tally, shows };
+  return { tally, shows, reasons, waiting };
 }
 
 interface ShowPref {
@@ -212,6 +238,13 @@ export const UNLISTED_HAND_DAYS = 14;
 export const HAND_SEARCH_PER_NIGHT = 60;
 /** A followed show of which wcostream lists none of the missing episodes is read again after this many days, or when one airs. */
 export const NONE_ON_WCO_DAYS = 3;
+/** The kinds of failure in words, for the summary and the home screen. */
+export const KIND_WORDS: Record<FailureKind, string> = {
+  refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
+  misnamed: 'named as another episode', 'not-dub': 'not a dub', unplayable: 'would not play or too short', stalled: 'stalled', other: 'other',
+};
+/** The attempt log is started again (the old one kept as .1) past this size. */
+const ATTEMPT_LOG_MAX = 5 * 1024 * 1024;
 /** The page has no video player for the episode: usually premium-only, or removed. */
 export const NO_PLAYER = /No video player iframe found|No stream server available/i;
 /** Needs you offers to delete staged downloads untouched for this long. */
@@ -304,7 +337,7 @@ export class FillService implements OnApplicationBootstrap {
   // ---------- Queue controls ----------
   async queueState() {
     const disk = await this.checkDisk();
-    return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget, disk, wco: this.wcoVerdict() };
+    return { paused: this.paused, night: isNight(), nightBudget: SETTINGS.nightBudget, disk, wco: this.wcoVerdict(), links: this.linkProgress() };
   }
 
   // ---------- wcostream unreadable (18 Nov 2026) ----------
@@ -620,6 +653,7 @@ export class FillService implements OnApplicationBootstrap {
     if (seriesIdParam || absoluteParam !== undefined || !pref) {
       const link = { seriesId, absolute, title: series.title as string };
       pref = (await this.changePrefs((p) => { p[slug] = { ...p[slug], ...link }; }))[slug];
+      if (seriesIdParam || !prefs[slug]) this.checkLinks([slug]);     // a new link: checked at once (19 Nov 2026)
     }
     const episodes = await this.mapEpisodes(seriesId);
     if (pref?.follow) {                 // keep the home list's counts fresh for a show that was just looked at
@@ -820,6 +854,7 @@ export class FillService implements OnApplicationBootstrap {
             this.logger.warn(`${job.title}: ${job.refused} refusals in a row, waiting ${wait} minutes`);
           }
         } else if (ep.state === 'done') job.refused = 0;
+        await this.logAttempt(job, ep);
         if (ep.state === 'failed' && (VIDEO_REFUSED.test(ep.message ?? '') || NO_PLAYER.test(ep.message ?? ''))) {
           await this.markDead(job.slug, ep.id).catch((e) => this.logger.warn(`Could not note ${job.title} ${ep.s}x${ep.e}: ${(e as Error).message}`));
         }
@@ -1023,6 +1058,24 @@ export class FillService implements OnApplicationBootstrap {
     if (search) await this.sonarr('post', 'command', { name: 'EpisodeSearch', episodeIds: ids });
   }
 
+  /**
+   * One line per finished attempt in config/fill-attempts.jsonl (19 Nov 2026): the queue keeps only its last 50 runs,
+   * which left three nights to learn from. Never fails a run.
+   */
+  private async logAttempt(job: FillJob, ep: FillEpisode) {
+    if (!['done', 'premium', 'kept', 'failed'].includes(ep.state)) return;
+    const file = path.join(this.configDir, 'fill-attempts.jsonl');
+    const line = JSON.stringify({ at: new Date().toISOString(), slug: job.slug, show: job.title, seriesId: job.seriesId, id: ep.id, s: ep.s, e: ep.e,
+      auto: !!job.auto, now: !!job.now, mode: ep.mode, state: ep.state,
+      kind: ep.state === 'failed' || ep.state === 'kept' ? failureKind(ep.message) : undefined, message: ep.message?.slice(0, 240) }) + '\n';
+    try {
+      const size = await fs.stat(file).then((st) => st.size, () => 0);
+      await fs.mkdir(this.configDir, { recursive: true });
+      if (size > ATTEMPT_LOG_MAX) await fs.rename(file, file + '.1');
+      await fs.appendFile(file, line);
+    } catch (e) { this.logger.warn(`Could not log the attempt: ${(e as Error).message}`); }
+  }
+
   /** The video of this episode could not be had tonight (counted once a night). */
   private async markDead(slug: string, id: number) {
     const day = new Date().toDateString();
@@ -1032,6 +1085,65 @@ export class FillService implements OnApplicationBootstrap {
       if (t.dead?.day === day) return;
       tries[id] = { ...t, dead: { n: (t.dead?.n ?? 0) + 1, day } };
     });
+  }
+
+  /**
+   * Read a show's list on wcostream and say whether the link looks like another show (unless someone said it is right)
+   * and how many of the episodes it needs wcostream lists. Undefined when the list could not be read properly.
+   */
+  private async linkVerdict(slug: string, pref: ShowPref, map: MapEpisode[], series: any[]): Promise<{ wrong?: string; onWco: number } | undefined> {
+    if (!this.wco) return undefined;
+    const listing = await this.wco.listing(slug, pref.language ?? 'dub');
+    if (!listing || !this.wcoVerdict().ok) return undefined;
+    if (!pref.linkOk) {
+      const s = series.find((x) => x.id === pref.seriesId);
+      const check = linkCheck(listing, map, !s || matchSeries(slug, [s]).length > 0);
+      if (!check.ok) return { wrong: check.why, onWco: 0 };
+    }
+    const sources = resolveSources(listing, map, !!pref.absolute);
+    const work = map.filter((e) => e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub'));
+    return { onWco: work.filter((e) => sources.get(e.id)?.kind !== 'none').length };
+  }
+
+  private linkRun?: { done: number; total: number; wrong: number; at: string };
+  private linkQueue = Promise.resolve();
+  /** How far "Check every link" has got, while it runs. */
+  linkProgress() { return this.linkRun && this.linkRun.done < this.linkRun.total ? { ...this.linkRun } : undefined; }
+
+  /**
+   * Check links and count what wcostream has (19 Nov 2026), for the given shows (just linked or followed) or every
+   * followed show, one after another behind the screen. Nothing is queued; only the link flag and the count change.
+   */
+  checkLinks(slugs?: string[]): { started: boolean; total: number } {
+    if (!this.wco) return { started: false, total: 0 };      // nothing to read the lists with
+    const go = async () => {
+      const prefs = await this.prefs();
+      const list = (slugs ?? Object.keys(prefs).filter((k) => prefs[k].follow)).filter((k) => prefs[k]);
+      const got = this.config.sonarrApiKey ? await this.allSeriesNow().catch(() => undefined) : undefined;
+      const series: any[] = Array.isArray(got) ? got : [];
+      const run = { done: 0, total: list.length, wrong: 0, at: new Date().toISOString() };
+      if (!slugs) this.linkRun = run;
+      for (const slug of list) {
+        try {
+          const pref = prefs[slug];
+          const map = await this.mapEpisodes(pref.seriesId);
+          const v = await this.linkVerdict(slug, pref, map, series);
+          if (v) {
+            if (v.wrong) run.wrong++;
+            await this.changePrefs((p) => {
+              const now = p[slug]; if (!now || now.seriesId !== pref.seriesId) return;
+              if (v.wrong && !now.linkOk) now.linkWrong = { why: v.wrong, at: new Date().toISOString() }; else delete now.linkWrong;
+              if (!v.wrong) now.counts = { ...(now.counts ?? countMap(map)), onWco: v.onWco, wcoAt: new Date().toISOString() };
+            });
+          }
+        } catch (e) { this.logger.warn(`Link check for ${slug}: ${(e as Error).message}`); }
+        run.done++;
+      }
+      this.logger.log(`Link check: ${run.done} show(s), ${run.wrong} look linked to another show`);
+    };
+    if (!slugs && this.linkProgress()) return { started: false, total: this.linkRun!.total };
+    this.linkQueue = this.linkQueue.then(go, go);
+    return { started: true, total: slugs?.length ?? -1 };
   }
 
   /** Mark the link of a show right ("The link is right"): the link check leaves it alone from now on. */
@@ -1054,6 +1166,7 @@ export class FillService implements OnApplicationBootstrap {
       p[slug] = { ...p[slug], seriesId, title: series.title, follow: !!body.follow,
         language: body.language === 'sub' ? 'sub' : 'dub', absolute: body.absolute ?? p[slug]?.absolute ?? false };
     });
+    if (body.follow) this.checkLinks([slug]);      // checked at once, not first at night (19 Nov 2026)
     return { slug, ...prefs[slug] };
   }
 
@@ -1078,6 +1191,7 @@ export class FillService implements OnApplicationBootstrap {
         linked.push(slug);
       }
     });
+    if (linked.length) this.checkLinks(linked);
     return { linked: linked.length, skipped };
   }
 
@@ -1244,21 +1358,14 @@ export class FillService implements OnApplicationBootstrap {
           !map.some((e) => due.includes(e.id) && e.a && e.a >= recentDay);
         if (quiet) { Object.assign(pref.counts, { onWco: 0, wcoAt: last!.wcoAt }); continue; }
         // Is the link this show at all? Another show's list would plan episodes that can never match (18 Nov 2026).
-        if (this.wco && Date.now() < deadline && !pref.linkOk) {
-          const listing = await this.wco.listing(slug, pref.language ?? 'dub');
-          if (listing && this.wcoVerdict().ok) {
-            const s = series.find((x) => x.id === pref.seriesId);
-            const check = linkCheck(listing, map, !s || matchSeries(slug, [s]).length > 0);
-            if (!check.ok) {
-              if (!pref.linkWrong) this.nightNotes.push(`${pref.title ?? slug}: the link to ${slug} on wcostream looks like another show (${check.why}); left out until it is changed`);
-              pref.linkWrong = { why: check.why!, at: new Date().toISOString() };
-              continue;
-            }
-            delete pref.linkWrong;
-            const sources = resolveSources(listing, map, !!pref.absolute);
-            const work = map.filter((e) => e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub'));
-            Object.assign(pref.counts, { onWco: work.filter((e) => sources.get(e.id)?.kind !== 'none').length, wcoAt: new Date().toISOString() });
+        if (Date.now() < deadline) {
+          const v = await this.linkVerdict(slug, pref, map, series);
+          if (v?.wrong) {
+            if (!pref.linkWrong) this.nightNotes.push(`${pref.title ?? slug}: the link to ${slug} on wcostream looks like another show (${v.wrong}); left out until it is changed`);
+            pref.linkWrong = { why: v.wrong, at: new Date().toISOString() };
+            continue;
           }
+          if (v) { delete pref.linkWrong; Object.assign(pref.counts, { onWco: v.onWco, wcoAt: new Date().toISOString() }); }
         }
         const kept = await this.dropUnlisted(slug, pref, map, due, tries, deadline, handOff);
         if (kept.length) plans.push({ slug, pref, due: kept });
@@ -1478,6 +1585,13 @@ export class FillService implements OnApplicationBootstrap {
     });
   }
 
+  /** Two minutes past the hour the night window closes: tell what the night did, even with episodes parked past it. */
+  @Cron('2 * * * *')
+  async nightClosing() {
+    if (new Date().getHours() !== NIGHT.to) return;
+    await this.notifyNight().catch((e) => this.logger.warn(`Summary failed: ${(e as Error).message}`));
+  }
+
   /** Every 10 minutes: start any automatic runs that are waiting for the night window. */
   @Cron('*/10 * * * *')
   wake() { if (isNight()) void this.pump(); }
@@ -1504,16 +1618,22 @@ export class FillService implements OnApplicationBootstrap {
    */
   private async notifyNight() {
     const { publicUrl } = this.config;
-    const prev = await this.getLastRun();
-    const since = Math.max(Date.now() - 20 * 3600 * 1000, prev ? new Date(prev.at).getTime() : 0);
-    const runs = this.jobs.filter((j) => j.auto && new Date(j.createdAt).getTime() > since);
+    // Every finished episode is told once (19 Nov 2026): the night's runs were never all finished while some were
+    // parked past 07:00, so no summary was written. Runs made in the last day, or partly told already, are looked at.
+    const FINAL = ['done', 'premium', 'kept', 'failed'];
+    const recent = Date.now() - 24 * 3600 * 1000;
+    const untold = (j: FillJob, id: number) => !(j.told ?? []).includes(id);
+    const runs = this.jobs.filter((j) => j.auto && (new Date(j.createdAt).getTime() > recent || j.told?.length) &&
+      j.episodes.some((e) => FINAL.includes(e.state) && untold(j, e.id)));
     if (!runs.length) return;
-    const { tally: t, shows } = tallyRuns(runs);
+    const { tally: t, shows, reasons, waiting } = tallyRuns(runs, (j, id) => !untold(j, id));
+    for (const j of runs) j.told = [...new Set([...(j.told ?? []), ...j.episodes.filter((e) => FINAL.includes(e.state)).map((e) => e.id)])];
+    await this.save();
     const notes = this.nightNotes.splice(0);
     const attention = await this.attention().then((a) => a.length, () => 0);
     const kind: LastRun['kind'] = runs.every((j) => j.now) ? 'now' : 'night';
     const from = runs.map((j) => j.createdAt).sort()[0];
-    this.lastRun = { at: new Date().toISOString(), from, kind, tally: t, shows, notes: notes.slice(0, 30), attention };
+    this.lastRun = { at: new Date().toISOString(), from, kind, tally: t, shows, notes: notes.slice(0, 30), attention, reasons, waiting };
     try {
       await fs.mkdir(this.configDir, { recursive: true });
       const tmp = this.lastRunFile + '.tmp';
@@ -1523,6 +1643,8 @@ export class FillService implements OnApplicationBootstrap {
     const filledShows = shows.filter((r) => r.filled + r.swapped > 0).map((r) => r.title);
     const body = `${kind === 'now' ? 'Filled now' : 'Overnight'}: ${t.filled} filled, ${t.swapped} swapped to dub, ${t.premium} premium to Sonarr, ${t.kept} to check, ${t.failed} failed.` +
       (filledShows.length ? `\nShows: ${filledShows.slice(0, 8).join(', ')}.` : '') +
+      (Object.keys(reasons).length ? `\nWhy: ${Object.entries(reasons).sort((a, b) => b[1]! - a[1]!).map(([k, n]) => `${n} ${KIND_WORDS[k as FailureKind]}`).join(', ')}.` : '') +
+      (waiting ? `\n${waiting} wait for the next night (parked after refusals).` : '') +
       (notes.length ? '\n' + notes.slice(0, 5).join('\n') : '') +
       (attention ? `\n${attention} need you: open the link.` : '');
     this.logger.log(body.replace(/\n/g, ' | '));

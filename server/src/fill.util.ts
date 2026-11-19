@@ -93,7 +93,10 @@ export interface SeriesLike {
 
 /** Sonarr series whose title, slug or alternate title matches the wco slug. Exact matches first. */
 export function matchSeries<T extends SeriesLike>(slug: string, series: T[]): T[] {
-  const want = normaliseTitle(slug.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
+  // A link's name may be percent-encoded ("ranma-%c2%bd-2024" is "Ranma ½ (2024)"; 19 Nov 2026 it was flagged as another show).
+  let name = slug;
+  try { name = decodeURIComponent(slug); } catch { /* keep it as written */ }
+  const want = normaliseTitle(name.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
   if (!want) return [];
   const keys = (s: T) =>
     [s.title, s.titleSlug ?? '', ...(s.alternateTitles ?? []).map((a) => a.title)].map(normaliseTitle).filter(Boolean);

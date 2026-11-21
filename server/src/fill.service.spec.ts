@@ -561,6 +561,22 @@ describe('FillService worker', () => {
     expect(await svc.setSeason({ slug: 're-zero-part-two', season: null })).toMatchObject({ season: null, absolute: false });
   });
 
+  it('starts the held queue as soon as any read works again', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { WcoHealth } = require('./wco-health');
+    const health = new WcoHealth();
+    const svc = new FillService((service as any).config, { health, peek: () => undefined, listing: jest.fn() } as any);
+    (svc as any).jobs = [];
+    (svc as any).pump = async () => undefined;
+    await svc.onApplicationBootstrap();
+    const pump = jest.spyOn(svc as any, 'pump').mockResolvedValue(undefined);
+    jest.spyOn(svc as any, 'tellWco').mockResolvedValue(undefined);
+    for (let i = 0; i < 5; i++) health.record('error', 'connect ECONNREFUSED 192.168.65.254:8191');
+    expect(pump).not.toHaveBeenCalled();
+    health.record('ok');                                              // a page read on the map, say
+    expect(pump).toHaveBeenCalledTimes(1);
+  });
+
   it('names why an episode failed, in a word', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { failureKind } = require('./fill.service');

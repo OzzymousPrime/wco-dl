@@ -356,7 +356,12 @@ export class FillService implements OnApplicationBootstrap {
     try { this.paused = !!JSON.parse(await fs.readFile(this.stateFile, 'utf8')).paused; } catch { this.paused = false; }
     try { this.applySettings(cleanSettings(JSON.parse(await fs.readFile(this.settingsFile, 'utf8')))); } catch { /* defaults */ }
     const health = this.wco?.health;
-    if (health) health.onChange = (v) => void this.tellWco(v).catch((e) => this.logger.warn(`wcostream message failed: ${(e as Error).message}`));
+    if (health) health.onChange = (v) => {
+      void this.tellWco(v).catch((e) => this.logger.warn(`wcostream message failed: ${(e as Error).message}`));
+      // Reads again, whatever read it (a page opened, a look-up): the held queue carries on now, not at the next
+      // night (21 Nov 2026: after a read on the map the queue sat still until something else started it).
+      if (v.ok) void this.pump();
+    };
     void this.pump();
   }
 

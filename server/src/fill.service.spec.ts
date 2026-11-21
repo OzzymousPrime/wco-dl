@@ -503,6 +503,42 @@ describe('FillService worker', () => {
     expect(r).toMatchObject({ tally: { filled: 1, failed: 0 }, waiting: 0 });
   });
 
+  // 21 Nov 2026: FlareSolverr had stopped; every show page was a 403 block page and 274 episodes failed as "not listed".
+  it('tells a block page from an episode wcostream does not list', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { failureKind, NOT_LISTED, BLOCKED } = require('./fill.service');
+    const blocked = 'Not downloaded: No episodes found on milo-murphys-law (HTTP 403).';
+    expect(failureKind(blocked)).toBe('blocked');
+    expect(NOT_LISTED.test(blocked)).toBe(false);
+    expect(BLOCKED.test('Byparr request to http://host.docker.internal:8191 for https://www.wcostream.tv/anime/x failed: connect ECONNREFUSED 192.168.65.254:8191')).toBe(true);
+    expect(NOT_LISTED.test('Not downloaded: No episodes found on chip-n-dale-park-life (HTTP 200).')).toBe(true);   // a real empty list
+  });
+
+  it('holds the queue while wcostream cannot be read, and runs it once a read works', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { WcoHealth } = require('./wco-health');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const health = new WcoHealth();
+    for (let i = 0; i < 5; i++) health.record('error', 'connect ECONNREFUSED 192.168.65.254:8191');
+    let reads = 0;
+    const wco = { health, peek: () => undefined, listing: jest.fn(async () => { reads++; health.record('error', 'still down'); return undefined; }) };
+    const svc = new FillService((service as any).config, wco as any);
+    const fill = jest.spyOn(svc as any, 'fillOne').mockImplementation(async (_j: any, e: any) => { e.state = 'done'; });
+    (svc as any).jobs = [{ id: 'h1', seriesId: 575, title: 'Re: ZERO', slug: 're-zero', quality: '1080', absolute: false, createdAt: new Date().toISOString(),
+      episodes: [{ id: 101, s: 2, e: 14, title: 'x', mode: 'missing', state: 'queued' }] }];
+    await (svc as any).pump();
+    expect(fill).not.toHaveBeenCalled();
+    expect(reads).toBe(1);                                             // one probe...
+    await (svc as any).pump();
+    expect(reads).toBe(1);                                             // ...at most every ten minutes
+    wco.listing.mockImplementation(async () => { health.record('ok'); return buildListing([]); });
+    (svc as any).probedAt = 0;
+    await (svc as any).pump();
+    expect(fill).toHaveBeenCalledTimes(1);
+    expect((svc as any).jobs[0].episodes[0].state).toBe('done');
+  });
+
   it('names why an episode failed, in a word', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { failureKind } = require('./fill.service');
@@ -669,6 +705,26 @@ describe('FillService start-up', () => {
     expect(a.episodes.map((e) => e.state)).toEqual(['queued', 'queued']);
     expect(a.episodes[0].message).toMatch(/Resumed/);
     expect(b.episodes.map((e) => e.state)).toEqual(['cancelled', 'queued', 'cancelled']);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+});
+
+describe('FillService start-up after wcostream could not be read', () => {
+  it('queues again the episodes that failed only on a block page, and leaves real failures', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'blocked-'));
+    const now = new Date().toISOString();
+    await fs.writeFile(path.join(dir, 'fill-jobs.json'), JSON.stringify([{ id: 'b1', seriesId: 1, title: 'Milo', slug: 'milo', quality: '1080', absolute: false, createdAt: now, auto: true, told: [1, 2],
+      episodes: [
+        { id: 1, s: 1, e: 1, title: 'a', mode: 'missing', state: 'failed', message: 'Not downloaded: No episodes found on milo (HTTP 403).' },
+        { id: 2, s: 1, e: 2, title: 'b', mode: 'missing', state: 'failed', message: "Not downloaded: wcostream's video server returned HTTP 404 (text/html) instead of a video." },
+      ] }]));
+    const svc = new FillService({ configDir: dir, outputBase: path.join(dir, 'out') } as unknown as AppConfig);
+    (svc as any).pump = async () => undefined;
+    await svc.onApplicationBootstrap();
+    const eps = (svc as any).jobs[0].episodes;
+    expect(eps[0]).toMatchObject({ state: 'queued', message: 'Queued again: wcostream could not be read when it ran' });
+    expect(eps[1].state).toBe('failed');
+    expect((svc as any).jobs[0].told).toEqual([2]);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
 });

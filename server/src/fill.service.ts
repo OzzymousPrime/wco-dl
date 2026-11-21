@@ -33,7 +33,7 @@ import { diskState, DiskState, lowDiskMessage } from './disk-space';
 import { WcoEpisodesService } from './wco-episodes.service';
 import { WcoVerdict } from './wco-health';
 
-const WCO_HELD = 'Until it reads again, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
+const WCO_HELD = 'Until it reads again, downloads wait, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 import { fileIsEpisode, fileTitle, latestText, linkCheck, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, Source } from './wco-episodes.util';
 
@@ -100,8 +100,9 @@ export function newestIds(groups: { id: number; a?: string }[][], cap: number): 
 /** What a set of automatic runs did, in all and per show. */
 export interface RunTally { filled: number; swapped: number; premium: number; kept: number; failed: number }
 /** Why an episode failed or was kept, in a word (19 Nov 2026): for the summary, the attempt log and the next review. */
-export type FailureKind = 'refused' | 'no-player' | 'unlisted' | 'misnamed' | 'not-dub' | 'unplayable' | 'stalled' | 'other';
+export type FailureKind = 'blocked' | 'refused' | 'no-player' | 'unlisted' | 'misnamed' | 'not-dub' | 'unplayable' | 'stalled' | 'other';
 export function failureKind(message = ''): FailureKind {
+  if (BLOCKED.test(message)) return 'blocked';
   if (VIDEO_REFUSED.test(message)) return 'refused';
   if (NO_PLAYER.test(message)) return 'no-player';
   if (NOT_LISTED.test(message)) return 'unlisted';
@@ -240,7 +241,7 @@ export const HAND_SEARCH_PER_NIGHT = 60;
 export const NONE_ON_WCO_DAYS = 3;
 /** The kinds of failure in words, for the summary and the home screen. */
 export const KIND_WORDS: Record<FailureKind, string> = {
-  refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
+  blocked: 'blocked (wcostream could not be read)', refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
   misnamed: 'named as another episode', 'not-dub': 'not a dub', unplayable: 'would not play or too short', stalled: 'stalled', other: 'other',
 };
 /** The attempt log is started again (the old one kept as .1) past this size. */
@@ -327,6 +328,18 @@ export class FillService implements OnApplicationBootstrap {
         }
       }
     } catch { this.jobs = []; }
+    // Failed only because wcostream could not be read (21 Nov 2026: 274 in two runs while FlareSolverr was down): queued
+    // again, so the night or the queue takes them as if nothing had happened. Only the last week, and each once.
+    const week = Date.now() - 7 * 86400000;
+    let again = 0;
+    for (const j of this.jobs) {
+      if (new Date(j.createdAt).getTime() < week) continue;
+      for (const e of j.episodes) if (e.state === 'failed' && BLOCKED.test(e.message ?? '') && !e.dismissed) {
+        e.state = 'queued'; e.message = 'Queued again: wcostream could not be read when it ran'; again++;
+        if (j.told) j.told = j.told.filter((id) => id !== e.id);
+      }
+    }
+    if (again) { this.logger.log(`Queued again ${again} episode(s) that failed only because wcostream could not be read`); await this.save(); }
     try { this.paused = !!JSON.parse(await fs.readFile(this.stateFile, 'utf8')).paused; } catch { this.paused = false; }
     try { this.applySettings(cleanSettings(JSON.parse(await fs.readFile(this.settingsFile, 'utf8')))); } catch { /* defaults */ }
     const health = this.wco?.health;
@@ -809,6 +822,17 @@ export class FillService implements OnApplicationBootstrap {
     return any;
   }
 
+  private probedAt = 0;
+  /** While wcostream cannot be read: one fresh read of the next run's show, at most every ten minutes. True when it reads. */
+  private async probeWco(job: FillJob): Promise<boolean> {
+    if (!this.wco || Date.now() - this.probedAt < 10 * 60 * 1000) return this.wcoVerdict().ok;
+    this.probedAt = Date.now();
+    await this.wco.listing(job.slug, job.language ?? 'dub', true).catch(() => undefined);
+    const ok = this.wcoVerdict().ok;
+    this.logger.log(ok ? 'wcostream reads again: the queue carries on' : 'wcostream still cannot be read: the queue waits');
+    return ok;
+  }
+
   private wakeTimer?: NodeJS.Timeout;
   /** Start the queue again when the earliest "servers busy" wait is over. */
   private scheduleWake() {
@@ -831,6 +855,9 @@ export class FillService implements OnApplicationBootstrap {
           if (this.requeueFailedOnce()) continue;
           this.scheduleWake(); break;
         }
+        // wcostream cannot be read (Byparr or FlareSolverr down, a challenge, a new layout): every episode would fail,
+        // so the queue waits. One read every ten minutes (the wake-up) says when it reads again (21 Nov 2026).
+        if (!this.wcoVerdict().ok && !(await this.probeWco(job))) break;
         const ep = job.episodes.find(ready)!;
         const disk = await this.checkDisk();
         if (disk.low) { await this.stopForSpace(disk); break; }
@@ -855,6 +882,13 @@ export class FillService implements OnApplicationBootstrap {
           }
         } else if (ep.state === 'done') job.refused = 0;
         await this.logAttempt(job, ep);
+        if (ep.state === 'failed' && BLOCKED.test(ep.message ?? '')) {
+          this.wco?.health?.record('error', ep.message);
+          ep.state = 'queued'; ep.message = 'Waiting: wcostream could not be read when it ran; it goes again once wcostream reads';
+          ep.notBefore = new Date(Date.now() + 30 * 60 * 1000).toISOString();     // one show blocked must not hold the rest
+          await this.save();
+          continue;
+        }
         if (ep.state === 'failed' && (VIDEO_REFUSED.test(ep.message ?? '') || NO_PLAYER.test(ep.message ?? ''))) {
           await this.markDead(job.slug, ep.id).catch((e) => this.logger.warn(`Could not note ${job.title} ${ep.s}x${ep.e}: ${(e as Error).message}`));
         }
@@ -1594,7 +1628,7 @@ export class FillService implements OnApplicationBootstrap {
 
   /** Every 10 minutes: start any automatic runs that are waiting for the night window. */
   @Cron('*/10 * * * *')
-  wake() { if (isNight()) void this.pump(); }
+  wake() { if (isNight() || !this.wcoVerdict().ok) void this.pump(); }
 
   private nightNotes: string[] = [];
   /** Runs whose list was read again for an episode it did not list, so it is read once per run. */
@@ -1818,7 +1852,13 @@ export const VIDEO_REFUSED = /returned HTTP (4\d\d|5\d\d)|instead of a video/i;
 /** This many refusals in a row and the rest of the run waits: 1 hour, then 2, 4, up to 6. */
 export const REFUSED_LIMIT = 5;
 /** wcostream has the show but no episode under this season and number, or no episodes in this language at all. */
-export const NOT_LISTED = /No episode matches|No episodes found|list index out of range|does not list this episode|is another episode/i;
+export const NOT_LISTED = /No episode matches|No episodes found(?! on \S+ \(HTTP [45]\d\d\))|list index out of range|does not list this episode|is another episode/i;
+/**
+ * wcostream could not be read at all (21 Nov 2026: FlareSolverr had stopped, so every show page came back as a 403
+ * block page, "No episodes found on x (HTTP 403)", and 274 episodes failed as "not listed" in two runs). Not the
+ * episode's fault: it goes back in the queue and the queue waits until wcostream reads again.
+ */
+export const BLOCKED = /No episodes found on \S+ \(HTTP [45]\d\d\)|Byparr request to \S+ for \S+ failed|ECONNREFUSED \S+:8191/i;
 
 /**
  * What a parked episode says. An overnight run whose wait ends outside the night window does not start again at that

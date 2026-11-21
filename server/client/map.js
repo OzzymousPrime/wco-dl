@@ -739,7 +739,7 @@
     if (d && d.low && !cur) return `<div class="runrow stop"><b>Stopped: disk nearly full</b><span class="what">${esc(String(d.freeGb))} GB free where downloads go, under the ${esc(String(d.minGb))} GB limit. ${waiting.length ? wait + '; nothing' : 'Nothing'} starts until there is room, checked every ten minutes</span><span class="grow"></span>${extra}</div>`;
     // wcostream unreadable (18 Nov 2026): Byparr down, a challenge it cannot pass, or a new page layout.
     const w = qstate.wco;
-    if (w && !w.ok && !cur) return `<div class="runrow stop"><b>wcostream can't be read</b><span class="what">${esc((w.why || '').replace(/^./, (c) => c.toUpperCase()))}${w.since ? ' (since ' + when(w.since) + ')' : ''}. Until a page reads properly, no episode counts as missing from wcostream</span><span class="grow"></span>${extra}</div>`;
+    if (w && !w.ok && !cur) return `<div class="runrow stop"><b>wcostream can't be read</b><span class="what">${esc((w.why || '').replace(/^./, (c) => c.toUpperCase()))}${w.since ? ' (since ' + when(w.since) + ')' : ''}. Downloads wait and start again by themselves once it reads (checked every ten minutes); no episode counts as missing from wcostream meanwhile</span><span class="grow"></span>${extra}</div>`;
     if (!cur && !waiting.length) return '';
     if (qstate.paused && !cur) return `<div class="runrow"><b>Paused</b><span class="what">${wait}; nothing starts until you press Resume in the queue</span><span class="grow"></span>${extra}</div>`;
     if (cur) {
@@ -1020,9 +1020,9 @@
   });
 
   // Why episodes failed, as the server names them (19 Nov 2026).
-  const KIND_WORDS = { refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
+  const KIND_WORDS = { blocked: 'blocked (wcostream could not be read)', refused: 'refused by the video server', 'no-player': 'with no video player (premium or removed)', unlisted: 'not listed on wcostream',
     misnamed: 'named as another episode', 'not-dub': 'not a dub', unplayable: 'would not play or too short', stalled: 'stalled', other: 'other' };
-  const KIND_SHORT = { refused: 'refused', 'no-player': 'no player', unlisted: 'not listed', misnamed: 'misnamed', 'not-dub': 'not a dub', unplayable: 'would not play', stalled: 'stalled', other: 'other' };
+  const KIND_SHORT = { blocked: 'blocked', refused: 'refused', 'no-player': 'no player', unlisted: 'not listed', misnamed: 'misnamed', 'not-dub': 'not a dub', unplayable: 'would not play', stalled: 'stalled', other: 'other' };
 
   // "Check every link" (19 Nov 2026): while it runs the followed list's heading says how far it has got; when it ends
   // the list is asked for again, so a show linked to another show appears under "Linked to the wrong show?".

@@ -160,8 +160,33 @@ export class AppController {
   /** "Check every link" (19 Nov 2026): every followed show's link and wcostream count, checked behind the screen. */
   @Post('followed/check-links')
   @UseGuards(JsonRequestGuard)
-  checkLinks() {
-    return this.fillService.checkLinks();
+  checkLinks(@Body() body: any) {
+    return this.fillService.checkLinks(undefined, !!body?.all);
+  }
+
+  /** The files in a show's second folders, with the episode each would be (22 Nov 2026). */
+  @Get('show/split')
+  async splitFiles(@Query('seriesId') seriesId: string) {
+    return (await this.fillService.splitFiles(Number(seriesId))).map(({ raw, ...f }) => f);
+  }
+
+  @Post('show/split/import')
+  @UseGuards(JsonRequestGuard)
+  importSplit(@Body() body: any) {
+    return this.fillService.importSplit(body);
+  }
+
+  /** Hand a whole followed show to Sonarr and stop following it (22 Nov 2026). */
+  @Post('followed/hand-off')
+  @UseGuards(JsonRequestGuard)
+  handOff(@Body() body: any) {
+    return this.fillService.handShowToSonarr(body);
+  }
+
+  @Post('links/no-swap')
+  @UseGuards(JsonRequestGuard)
+  noSwap(@Body() body: any) {
+    return this.fillService.setNoSwap(body);
   }
 
   /** "This wcostream show is Sonarr season N" (21 Nov 2026): { slug, season } or { slug, season: null }. */

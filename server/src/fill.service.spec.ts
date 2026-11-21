@@ -577,6 +577,71 @@ describe('FillService worker', () => {
     expect(pump).toHaveBeenCalledTimes(1);
   });
 
+  // 22 Nov 2026: 17 followed shows had a second folder Sonarr does not track; their episodes were downloaded again.
+  it('lists a second folder\'s files with the episode each would be, and imports only into episodes with no file', async () => {
+    const svc = new FillService((service as any).config);
+    (svc as any).splitFolders = async () => new Map([[575, ['E:/TV/Re Zero (old)']]]);
+    const sent: any[] = [];
+    (svc as any).mapEpisodes = async () => [                           // 2x14 has a file once the import was sent
+      { id: 101, s: 2, e: 14, t: 'Straight Bet', st: sent.length ? 'dub' : 'missing' }, { id: 102, s: 2, e: 15, t: 'Otto Suwen', st: 'undub' }];
+    (svc as any).sonarr = jest.fn(async (method: string, url: string, data?: any) => {
+      if (url.startsWith('manualimport?')) return [
+        { path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 101 }] },
+        { path: 'E:/TV/Re Zero (old)/Re Zero - 2x15.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 102 }] },
+        { path: 'E:/TV/Re Zero (old)/notes.txt', episodes: [] },
+        { path: 'E:/TV/Re Zero (old)/Extra.mp4', episodes: [] }];
+      if (url === 'command') { sent.push(data); return { id: 9 }; }
+      if (url.startsWith('command/')) return { status: 'completed' };
+      return {};
+    });
+    const files = await svc.splitFiles(575);
+    expect(files.map((f) => [f.name, f.ok, f.why])).toEqual([
+      ['Re Zero - 2x14.mkv', true, ''], ['Re Zero - 2x15.mkv', false, 'that episode has a file already'], ['Extra.mp4', false, 'Sonarr cannot tell which episode this is']]);
+    jest.spyOn(global, 'setTimeout').mockImplementation(((fn: any) => { fn(); return 0 as any; }) as any);
+    const r = await svc.importSplit({ seriesId: 575, paths: files.map((f) => f.path) });
+    (global.setTimeout as any).mockRestore?.();
+    expect(r).toMatchObject({ imported: 1, asked: 1, status: 'completed' });
+    expect(sent[0]).toMatchObject({ name: 'ManualImport', importMode: 'move', files: [{ path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', seriesId: 575, episodeIds: [101] }] });
+    await expect(svc.importSplit({ seriesId: 575, paths: [] })).rejects.toThrow(/Pick the files/);
+  });
+
+  it('clears from Needs you what is not on wcostream and already with Sonarr, or three days old; keeps the rest', async () => {
+    const svc = new FillService((service as any).config);
+    (svc as any).mapEpisodes = async () => [];
+    await (svc as any).changePrefs((p: any) => { p.nyshow = { seriesId: 575, tries: { 1: { n: 1, last: '', handedToSonarr: true } } }; });
+    const old = new Date(Date.now() - 4 * 86400000).toISOString(), recent = new Date().toISOString();
+    const unlisted = 'Not downloaded: wcostream does not list this episode under this season and number';
+    (svc as any).jobs = [
+      { id: 'a', seriesId: 575, title: 'S', slug: 'nyshow', createdAt: recent, finishedAt: recent, episodes: [
+        { id: 1, s: 1, e: 1, title: 'handed', mode: 'missing', state: 'failed', message: unlisted },
+        { id: 2, s: 1, e: 2, title: 'recent', mode: 'missing', state: 'failed', message: unlisted },
+        { id: 3, s: 1, e: 3, title: 'refused', mode: 'missing', state: 'failed', message: "Not downloaded: wcostream's video server returned HTTP 404 (text/html) instead of a video." }] },
+      { id: 'b', seriesId: 575, title: 'S', slug: 'nyshow', createdAt: old, finishedAt: old, episodes: [
+        { id: 4, s: 1, e: 4, title: 'old', mode: 'missing', state: 'failed', message: unlisted }] },
+    ];
+    expect((await svc.attention()).map((a) => a.title).sort()).toEqual(['recent', 'refused']);
+  });
+
+  it('never plans a swap for a show set to "no dialogue", and counts no undubbed for it', async () => {
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    expect(await svc.setNoSwap({ slug: 're-zero', noSwap: true })).toEqual({ slug: 're-zero', noSwap: true });
+    await svc.setPaused(true);
+    const made = await svc.nightlyPlan();
+    expect(made.flatMap((j) => j.episodes).some((e) => e.mode === 'swap')).toBe(false);
+    expect((await svc.followed()).find((x) => x.slug === 're-zero')).toMatchObject({ undub: 0, noSwap: true });
+    await svc.setNoSwap({ slug: 're-zero', noSwap: false });
+  });
+
+  it('hands a whole show to Sonarr: monitors the series and its missing episodes, searches, and stops following', async () => {
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 'gone-show', seriesId: 575, follow: true, language: 'dub' });
+    const r = await svc.handShowToSonarr({ slug: 'gone-show' });
+    expect(r).toMatchObject({ slug: 'gone-show', monitored: 1, searched: 1 });
+    expect(calls.find((c) => c.data?.name === 'EpisodeSearch')!.data.episodeIds).toEqual([101]);
+    expect((await (svc as any).prefs())['gone-show'].follow).toBe(false);
+  });
+
   it('names why an episode failed, in a word', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { failureKind } = require('./fill.service');

@@ -185,6 +185,8 @@ interface ShowPref {
   numbering?: NumberingFit & { at: string };
   /** Episodes already announced as new on wcostream in English (the new-dub check), so each is told once. */
   announced?: number[];
+  /** Never swap this show's files for the dub (22 Nov 2026: Minuscule has no dialogue, so "undubbed" means nothing). */
+  noSwap?: boolean;
 }
 interface ShowPrefs { [slug: string]: ShowPref }
 /**
@@ -468,7 +470,18 @@ export class FillService implements OnApplicationBootstrap {
         for (const e of await this.mapEpisodes(seriesId)) if (e.st === 'dub' || ((e.st === 'undub' || e.st === 'unknown') && latest.get(e.id)?.ep.mode === 'missing')) filled.add(e.id);
       } catch { /* Sonarr did not answer: keep the rows */ }
     }
-    items = items.filter(({ ep }) => !filled.has(ep.id));
+    // Not on wcostream (or blocked) and handed to Sonarr, or three days old: nothing left to do here (22 Nov 2026: most
+    // of the 52 rows were episodes the site does not have, already with Sonarr).
+    const prefs = await this.prefs().catch(() => ({} as ShowPrefs));
+    const stale = Date.now() - 3 * 86400000;
+    items = items.filter(({ job, ep }) => {
+      if (filled.has(ep.id)) return false;
+      if (ep.state !== 'failed') return true;
+      const kind = failureKind(ep.message);
+      if (kind !== 'unlisted' && kind !== 'blocked') return true;
+      const handed = !!prefs[job.slug]?.tries?.[ep.id]?.handedToSonarr;
+      return !handed && new Date(job.finishedAt ?? job.createdAt).getTime() > stale;
+    });
     return items
       .map(({ job, ep }) => ({ jobId: job.id, seriesId: job.seriesId, show: job.title, slug: job.slug, auto: !!job.auto, at: job.finishedAt ?? job.createdAt,
         id: ep.id, s: ep.s, e: ep.e, title: ep.title, mode: ep.mode, state: ep.state, message: ep.message ?? '' }))
@@ -596,6 +609,84 @@ export class FillService implements OnApplicationBootstrap {
     return map;
   }
 
+  /**
+   * The video files in a show's second folders, the ones Sonarr does not track (22 Nov 2026: 17 followed shows had
+   * one, and their episodes were downloaded again because Sonarr counted them missing). Each with the episode Sonarr
+   * reads it as, and whether it can be imported: only into an episode with no file.
+   */
+  async splitFiles(seriesId: number) {
+    const folders = (await this.splitFolders()).get(seriesId) ?? [];
+    const map = await this.mapEpisodes(seriesId);
+    const byId = new Map(map.map((e) => [e.id, e]));
+    const out: { folder: string; path: string; name: string; episodes: { id: number; s: number; e: number; t: string }[]; ok: boolean; why: string; raw: any }[] = [];
+    for (const folder of folders) {
+      const cands = await this.sonarr<any[]>('get', `manualimport?folder=${encodeURIComponent(folder)}&seriesId=${seriesId}&filterExistingFiles=true`);
+      for (const c of cands ?? []) {
+        if (!VIDEO.test(String(c.path))) continue;
+        const eps = (c.episodes ?? []).map((e: any) => byId.get(e.id)).filter(Boolean) as MapEpisode[];
+        const why = !eps.length ? 'Sonarr cannot tell which episode this is'
+          : eps.some((e) => e.st !== 'missing' && e.st !== 'future') ? 'that episode has a file already' : '';
+        out.push({ folder, path: c.path, name: String(c.path).split(/[\\/]/).pop() ?? '', episodes: eps.map((e) => ({ id: e.id, s: e.s, e: e.e, t: e.t })), ok: !why, why, raw: c });
+      }
+    }
+    return out;
+  }
+
+  /** Import the chosen files of a show's second folders into Sonarr (moved into the show's folder). */
+  async importSplit(body: { seriesId?: number; paths?: string[] }) {
+    const seriesId = Number(body?.seriesId);
+    const want = new Set((Array.isArray(body?.paths) ? body.paths : []).map(String));
+    if (!seriesId || !want.size) throw new BadRequestException('Pick the files to import');
+    const files = (await this.splitFiles(seriesId)).filter((f) => f.ok && want.has(f.path));
+    if (!files.length) throw new BadRequestException('None of those files can be imported');
+    const cmd = await this.sonarr('post', 'command', {
+      name: 'ManualImport', importMode: 'move',
+      files: files.map((f) => ({ path: f.path, folderName: f.raw.folderName, seriesId, episodeIds: f.episodes.map((e) => e.id),
+        quality: f.raw.quality, languages: f.raw.languages ?? [], releaseGroup: f.raw.releaseGroup, indexerFlags: 0,
+        releaseType: f.episodes.length > 1 ? 'multiEpisode' : 'singleEpisode' })),
+    });
+    let status = 'queued';
+    for (let i = 0; i < 150 && status !== 'completed' && status !== 'failed'; i++) {
+      await sleep(2000);
+      status = (await this.sonarr('get', `command/${cmd.id}`)).status;
+    }
+    this.splitCache = undefined;
+    const map = await this.mapEpisodes(seriesId);
+    const imported = files.filter((f) => f.episodes.every((e) => map.find((m) => m.id === e.id)?.st !== 'missing')).length;
+    this.logger.log(`Second folder of series ${seriesId}: ${imported} of ${files.length} file(s) imported into Sonarr`);
+    return { imported, asked: files.length, status };
+  }
+
+  /**
+   * Hand a whole followed show to Sonarr (22 Nov 2026): for a show wcostream has none of. Its missing episodes and the
+   * series are monitored, Sonarr searches for them (at most HAND_SEARCH_PER_NIGHT episodes; the rest it finds in its
+   * feed), and the show is no longer followed.
+   */
+  async handShowToSonarr(body: { slug?: string }) {
+    let slug: string;
+    try { slug = parseShowLink(String(body?.slug ?? '')).slug; } catch (e) { throw new BadRequestException((e as Error).message); }
+    const pref = (await this.prefs())[slug];
+    if (!pref) throw new NotFoundException('That show is not linked');
+    const ids = (await this.mapEpisodes(pref.seriesId, pref.season)).filter((e) => e.st === 'missing').map((e) => e.id);
+    const series = await this.sonarr<any>('get', `series/${pref.seriesId}`);
+    if (!series.monitored) await this.sonarr('put', `series/${pref.seriesId}`, { ...series, monitored: true });
+    if (ids.length) await this.handToSonarr(ids, ids.length <= HAND_SEARCH_PER_NIGHT);
+    await this.changePrefs((p) => { if (p[slug]) p[slug].follow = false; });
+    return { slug, monitored: ids.length, searched: ids.length <= HAND_SEARCH_PER_NIGHT ? ids.length : 0, seriesMonitored: true };
+  }
+
+  /** "Never swap to the dub" for a show with no dialogue (22 Nov 2026). */
+  async setNoSwap(body: { slug?: string; noSwap?: boolean }) {
+    let slug: string;
+    try { slug = parseShowLink(String(body?.slug ?? '')).slug; } catch (e) { throw new BadRequestException((e as Error).message); }
+    const prefs = await this.changePrefs((p) => {
+      if (!p[slug]) return;
+      if (body?.noSwap) { p[slug].noSwap = true; if (p[slug].counts) p[slug].counts!.undub = 0; } else delete p[slug].noSwap;
+    });
+    if (!prefs[slug]) throw new NotFoundException('That show is not linked');
+    return { slug, noSwap: !!prefs[slug].noSwap };
+  }
+
   // ---------- Adding a show to Sonarr from a wcostream search result ----------
   /** New shows go where the most recently added animated series went, with its profile and settings. */
   async addDefaults() {
@@ -698,7 +789,7 @@ export class FillService implements OnApplicationBootstrap {
     }
     return {
       slug: parsed.slug, language: parsed.language, series: brief(series), absolute,
-      follow: !!pref?.follow, followLanguage: pref?.language ?? 'dub', season: pref?.season,
+      follow: !!pref?.follow, followLanguage: pref?.language ?? 'dub', season: pref?.season, noSwap: !!pref?.noSwap,
       seasons: [...new Set((await this.mapEpisodes(seriesId)).map((e) => e.s))],
       candidates: candidates.map(brief), episodes, split: (await this.splitFolders()).get(seriesId) ?? [],
       ...(pick ? { pick } : {}),
@@ -1179,11 +1270,11 @@ export class FillService implements OnApplicationBootstrap {
    * Check links and count what wcostream has (19 Nov 2026), for the given shows (just linked or followed) or every
    * followed show, one after another behind the screen. Nothing is queued; only the link flag and the count change.
    */
-  checkLinks(slugs?: string[]): { started: boolean; total: number } {
+  checkLinks(slugs?: string[], all = false): { started: boolean; total: number } {
     if (!this.wco) return { started: false, total: 0 };      // nothing to read the lists with
     const go = async () => {
       const prefs = await this.prefs();
-      const list = (slugs ?? Object.keys(prefs).filter((k) => prefs[k].follow)).filter((k) => prefs[k]);
+      const list = (slugs ?? Object.keys(prefs).filter((k) => all || prefs[k].follow)).filter((k) => prefs[k]);
       const got = this.config.sonarrApiKey ? await this.allSeriesNow().catch(() => undefined) : undefined;
       const series: any[] = Array.isArray(got) ? got : [];
       const run = { done: 0, total: list.length, wrong: 0, at: new Date().toISOString() };
@@ -1227,6 +1318,10 @@ export class FillService implements OnApplicationBootstrap {
       if (pref.counts) { delete pref.counts.onWco; delete pref.counts.wcoAt; }    // counted under the old numbering
     });
     if (!prefs[slug]) throw new NotFoundException('That show is not linked');
+    try {
+      const counts = countMap(await this.mapEpisodes(prefs[slug].seriesId, prefs[slug].season));
+      await this.changePrefs((p) => { if (p[slug]) p[slug].counts = counts; });
+    } catch { /* counted at night */ }
     this.checkLinks([slug]);
     return { slug, season: prefs[slug].season ?? null, absolute: !!prefs[slug].absolute };
   }
@@ -1308,7 +1403,8 @@ export class FillService implements OnApplicationBootstrap {
       .map(({ s, link, total, gaps, undub }) => {
         const base = { id: s.id as number, title: s.title as string, year: s.year as number, path: s.path as string, root: root(s.path), gaps, undub, total,
           split: split.get(s.id) ?? [] };
-        if (link) return { ...base, state: link.pref.follow ? 'following' : 'linked', slug: link.slug, language: link.pref.language ?? 'dub', candidates: [] as CatalogueMatch[] };
+        if (link) return { ...base, state: link.pref.follow ? 'following' : 'linked', slug: link.slug, language: link.pref.language ?? 'dub', candidates: [] as CatalogueMatch[],
+          onWco: link.pref.counts?.onWco };
         const m = matchCatalogue(s, index);
         return { ...base, state: m.kind as string, slug: undefined as string | undefined, language: undefined as string | undefined, candidates: m.candidates };
       })
@@ -1384,10 +1480,11 @@ export class FillService implements OnApplicationBootstrap {
       const st = facts?.stats[p.seriesId];
       // A real count (monitored or not) when there is one; else Sonarr's own, which skips unmonitored episodes.
       return { slug, title: p.title, seriesId: p.seriesId, language: p.language ?? 'dub',
-        missing: p.counts?.missing ?? (st ? Math.max(0, st[0] - st[1]) : undefined),
-        undub: p.language === 'sub' ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: facts?.split[p.seriesId] ?? [],
+        // A season link's count is its own season's; Sonarr's whole-series figure would count every season (JoJo 174 three times).
+        missing: p.counts?.missing ?? (st && !p.season ? Math.max(0, st[0] - st[1]) : undefined),
+        undub: p.language === 'sub' || p.noSwap ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: facts?.split[p.seriesId] ?? [],
         unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p),
-        onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why };
+        onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why, noSwap: !!p.noSwap, season: p.season };
     });
   }
 
@@ -1422,10 +1519,11 @@ export class FillService implements OnApplicationBootstrap {
         const map = await this.mapEpisodes(pref.seriesId, pref.season);
         const last = pref.counts;
         pref.counts = countMap(map);
+        if (pref.noSwap) pref.counts.undub = 0;
         const tries = (pref.tries ??= {});
         const due: number[] = [], gaveUp: MapEpisode[] = [], dead: MapEpisode[] = [];
         for (const e of map) {
-          const work = e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub');
+          const work = e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub' && !pref.noSwap);
           if (!work) { delete tries[e.id]; continue; }
           if (busy.has(e.id)) continue;
           const t = tries[e.id];

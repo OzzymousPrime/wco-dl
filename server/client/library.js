@@ -34,6 +34,9 @@
     const n = (k) => rows.filter((r) => kindOf(r) === k);
     $('tally').innerHTML = `<span><b>${rows.length}</b> series with work</span><span><b>${sum(rows, 'gaps').toLocaleString('en-GB')}</b> episodes missing</span>` +
       `<span><b>${n('following').length}</b> following</span><span><b>${n('linked').length}</b> linked, not followed</span><span><b>${n('ready').length}</b> ready to follow</span><span><b>${n('maybe').length}</b> need a decision</span><span><b>${n('none').length}</b> no match</span>`;
+    const withWco = linkedRows();
+    $('followlinked').hidden = !withWco.length;
+    $('followlinkedlabel').textContent = `Follow the ${withWco.length} linked with episodes on wcostream`;
     const ready = readyRows();
     $('followall').hidden = !ready.length;
     $('followlabel').textContent = `Follow the ${ready.length} ready to follow${ready.length !== n('ready').length ? ' in this folder or filter' : ''}`;
@@ -49,12 +52,18 @@
     return rows.filter((r) => (drive === 'all' || r.root === drive) && kindOf(r) === 'ready' && (!f || r.title.toLowerCase().includes(f)));
   }
 
+  // Linked, not followed, and counted to have episodes on wcostream (22 Nov 2026: 257 linked shows held 3,874 gaps).
+  function linkedRows() {
+    const f = $('filter').value.trim().toLowerCase();
+    return rows.filter((r) => (drive === 'all' || r.root === drive) && r.state === 'linked' && r.onWco > 0 && (!f || r.title.toLowerCase().includes(f)));
+  }
+
   function row(r) {
     const map = (slug) => `<a class="linkbtn" href="/map.html?url=${encodeURIComponent(slug)}">Open map</a>`;
     const find = `<button class="linkbtn" data-find type="button">${r.state === 'none' ? 'Search wcostream' : 'Search for another'}</button>`;
     let match, acts;
     if (r.state === 'following') { match = `<span class="tag ok">Following</span><span>${esc(r.slug)} · ${r.language}</span>`; acts = map(r.slug); }
-    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>`; acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
+    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>${r.onWco === undefined ? '' : `<span class="tag">${r.onWco ? r.onWco + ' on wcostream' : 'none on wcostream'}</span>`}`; acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
     else if (r.state === 'exact') {
       const c = r.candidates[0];
       match = `<span>${esc(c.name)}</span>${c.language === 'sub' ? '<span class="tag">sub only</span>' : ''}${find}`;
@@ -124,6 +133,21 @@
     $('followall').disabled = true;
     try { await follow(items); } catch (e) { status(`Could not follow them: ${e.message}`, true); }
     $('followall').disabled = false;
+  };
+  $('followlinked').onclick = async () => {
+    const items = linkedRows().map((r) => ({ r, c: { slug: r.slug, language: r.language || 'dub' } }));
+    if (!items.length) return;
+    $('followlinked').disabled = true;
+    try { await follow(items); } catch (e) { status(`Could not follow them: ${e.message}`, true); }
+    $('followlinked').disabled = false;
+  };
+  $('countwco').onclick = async () => {
+    $('countwco').disabled = true;
+    try {
+      const r = await api('POST', '/followed/check-links', { all: true });
+      toast(r.started ? 'Counting what wcostream has for every linked show. This takes a while; reload this page later to see the counts' : 'A count is running already');
+    } catch (e) { status(`Could not start the count: ${e.message}`, true); }
+    $('countwco').disabled = false;
   };
   $('drive').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { drive = b.dataset.v; render(); } });
   $('kind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { kind = b.dataset.v; render(); } });

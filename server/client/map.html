@@ -55,6 +55,7 @@
           <button type="button" data-v="false" aria-pressed="true">By season</button><button type="button" data-v="true" aria-pressed="false">Straight through</button>
         </div>
         <button class="btn follow" id="follow" type="button" aria-pressed="false" data-icon="check"><span class="swap" id="followlabel"><span class="on">Following overnight</span><span class="off">Follow overnight</span></span></button>
+        <label class="noswap" id="noswaplabel" hidden><input type="checkbox" id="noswap"> No dialogue: never swap</label>
         <div class="seg" role="group" aria-label="Audio" id="lang">
           <button type="button" data-v="dub" aria-pressed="true">Dub</button><button type="button" data-v="sub" aria-pressed="false">Sub</button>
         </div>
@@ -99,7 +100,7 @@
     <p class="stage" id="stage" aria-live="polite" hidden></p>
     <details class="night" id="night" hidden><summary id="nightsum"></summary><div class="nbody" id="nightbody"></div></details>
     <div class="fhead" id="fhead"><h2>Followed shows <span class="count" id="fcount"></span></h2>
-      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span><span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span><span id="flinks" aria-live="polite" hidden></span> </span><button class="btn btn-quiet" id="recount" type="button" data-icon="refresh">Recount</button><span class="grow"></span>
+      <span class="hint">Their gaps and dub swaps fill overnight, between <span data-night>01:00 and 07:00</span><span id="fcounted"></span><span id="fupdating" hidden> · checking Sonarr for changes</span><span id="fswitch" hidden></span><span id="flinks" aria-live="polite" hidden></span> </span><button class="btn btn-quiet" id="recount" type="button" data-icon="refresh">Recount</button><span class="grow"></span>
       <div class="seg" role="group" aria-label="Which followed shows" id="fkind">
         <button type="button" data-v="incomplete" aria-pressed="true">Incomplete <span class="count" id="fincomplete"></span></button><button type="button" data-v="all" aria-pressed="false">All <span class="count" id="fall"></span></button>
       </div>

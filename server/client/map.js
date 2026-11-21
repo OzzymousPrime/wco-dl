@@ -246,7 +246,42 @@
   // Which part of the Sonarr series this wcostream show is (21 Nov 2026): the whole series, or one season numbered
   // from 1 (wcostream's Horizons is Pokémon's season 20; Steel Ball Run is JoJo's season 6). Offered when Sonarr has
   // more than one season; with a season set the numbering is straight through, so its switch is hidden.
+  // A second folder Sonarr does not track (22 Nov 2026): list its files with the episode each would be, import the chosen ones.
+  $('split').addEventListener('click', async (ev) => {
+    const box = $('splitfiles');
+    if (ev.target.closest('#splitlook')) {
+      box.hidden = false; box.textContent = 'Asking Sonarr which episode each file is…';
+      try {
+        const files = await api('GET', '/show/split?seriesId=' + show.series.id);
+        const ok = files.filter((f) => f.ok);
+        box.innerHTML = files.length ? files.map((f, i) => `<label><input type="checkbox" data-split="${i}"${f.ok ? ' checked' : ' disabled'}><span class="fn">${esc(f.name)}</span>` +
+          `<span class="${f.ok ? '' : 'why'}">${f.ok ? '→ ' + f.episodes.map((e) => `${e.s}x${pad(e.e)} ${esc(e.t)}`).join(', ') : esc(f.why)}</span></label>`).join('') +
+          (ok.length ? `<button class="btn" id="splitimport" type="button">${UI.icon('download')}Import the chosen files into Sonarr</button>` : '<span class="why">Nothing here can be imported.</span>')
+          : 'No video files in it.';
+        box._files = files;
+      } catch (e) { box.textContent = `Could not read it: ${e.message}`; }
+      return;
+    }
+    if (ev.target.closest('#splitimport')) {
+      const files = box._files || [], paths = [...box.querySelectorAll('[data-split]:checked')].map((c) => files[+c.dataset.split].path);
+      if (!paths.length) return;
+      ev.target.closest('#splitimport').disabled = true; status(`Importing ${paths.length} file${paths.length === 1 ? '' : 's'} into Sonarr…`);
+      try {
+        const r = await api('POST', '/show/split/import', { seriesId: show.series.id, paths });
+        status(''); toast(`Imported ${r.imported} of ${r.asked} into Sonarr: those episodes are no longer missing`);
+        await openShow(link, { push: false });
+      } catch (e) { status(`Could not import: ${e.message}`, true); }
+    }
+  });
+  // No dialogue (22 Nov 2026): a show whose files are "undubbed" only because there is no speech is never swapped.
+  $('noswap').addEventListener('change', async () => {
+    try { await api('POST', '/links/no-swap', { slug: show.slug, noSwap: $('noswap').checked }); toast($('noswap').checked ? 'Never swapped: its files stay as they are' : 'Swapped to the dub again where one exists'); }
+    catch (e) { $('noswap').checked = !$('noswap').checked; status(`Could not change it: ${e.message}`, true); }
+  });
+
   function setSeasonPick() {
+    $('noswaplabel').hidden = !show?.series;
+    $('noswap').checked = !!show?.noSwap;
     const seasons = (show?.seasons || []).filter((n) => n > 0);
     $('seasonpick').hidden = !show?.series || (seasons.length < 2 && !show.season);
     $('numbering').hidden = !!show?.season;
@@ -381,7 +416,8 @@
     $('path').textContent = show.series.path;
     const split = show.split || [];
     $('split').hidden = !split.length;
-    $('split').textContent = split.length ? `This show also has a folder Sonarr does not track: ${split.join(', ')}. If episodes look missing here, they may be in there: merge the folders before downloading them again.` : '';
+    $('split').innerHTML = split.length ? `This show also has a folder Sonarr does not track: <code>${esc(split.join(', '))}</code>. Episodes in it count as missing here, so they would be downloaded again. ` +
+      `<button class="linkbtn" id="splitlook" type="button">See the files in it</button><div class="splitfiles" id="splitfiles" hidden></div>` : '';
     dubNote(show.series.id);
     // Download waits for this answer (20 seconds at most), so nothing is picked that wcostream does not list.
     const asked = wcoPending = Promise.race([wcoNote(show.series.id), new Promise((r) => setTimeout(r, 20000))])
@@ -885,7 +921,15 @@
         rowOf(x.slug)?.querySelector('[data-unfollow]')?.focus({ preventScroll: true });
       } });
   }
-  $('followedlist').addEventListener('click', (ev) => {
+  $('followedlist').addEventListener('click', async (ev) => {
+    const h = ev.target.closest('[data-handoff]');
+    if (h) {
+      const x = followed.find((f) => f.slug === h.closest('li').dataset.key); if (!x) return;
+      h.disabled = true;
+      try { const r = await api('POST', '/followed/hand-off', { slug: x.slug }); toast(`${x.title || x.slug}: ${r.monitored} episode${r.monitored === 1 ? '' : 's'} handed to Sonarr${r.searched ? ', searched for now' : ', for Sonarr to find'}; no longer followed`); await loadFollowed(); }
+      catch (e) { h.disabled = false; status(`Could not hand it to Sonarr: ${e.message}`, true); }
+      return;
+    }
     const b = ev.target.closest('[data-unfollow]'); if (!b) return;
     const x = followed.find((f) => f.slug === b.closest('li').dataset.key);
     if (x) unfollow(x);
@@ -935,7 +979,7 @@
     for (const j of allRuns) for (const e of j.episodes) if (ACTIVE.includes(e.state)) {
       const a = act.get(j.seriesId) || { n: 0, cur: null }; a.n++; if (isWorking(e)) a.cur = e; act.set(j.seriesId, a);
     }
-    renderAttention(); renderLinks(); renderStage(); renderNight();
+    renderAttention(); renderLinks(); renderStage(); renderNight(); renderSwitch();
     if (!followedLoaded) return;                       // the still grey rows stay until the first answer
     $('followedlist').removeAttribute('aria-busy');
     const f = $('ffilter').value.trim().toLowerCase(), name = (x) => x.title || x.slug;
@@ -967,6 +1011,7 @@
       return { key: x.slug, html: `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
         `<span class="ft"><b class="fname">${esc(name(x))}</b><span class="fmeta">${lacks}${marks}</span></span></a>` +
         (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') +
+        (!x.linkWrong && needs(x) && x.onWco === 0 ? `<button class="btn btn-quiet" data-handoff type="button" aria-label="Hand ${esc(name(x))} to Sonarr" title="wcostream has none of its missing episodes: Sonarr monitors and searches for them, and it is no longer followed">Hand to Sonarr</button>` : '') +
         `<button class="btn btn-quiet danger" data-unfollow type="button" aria-label="Unfollow ${esc(name(x))}">${UI.icon('x')}Unfollow</button></li>` };
     }));
   }
@@ -1048,6 +1093,18 @@
 
   // "Check every link" (19 Nov 2026): while it runs the followed list's heading says how far it has got; when it ends
   // the list is asked for again, so a show linked to another show appears under "Linked to the wrong show?".
+  // The other numbering would supply more (22 Nov 2026): one press switches every such followed show.
+  function renderSwitch() {
+    const sw = followed.filter((x) => x.switchTo);
+    $('fswitch').hidden = !sw.length;
+    if (sw.length) $('fswitch').innerHTML = ` · ${sw.length} would get more with the other numbering <button class="linkbtn" id="doswitch" type="button">Switch ${sw.length === 1 ? 'it' : 'them'}</button>`;
+  }
+  $('fswitch').addEventListener('click', async (ev) => {
+    if (!ev.target.closest('#doswitch')) return;
+    const sw = followed.filter((x) => x.switchTo); let n = 0;
+    for (const x of sw) { try { await api('GET', `/show?url=${encodeURIComponent(x.slug)}&absolute=${x.switchTo === 'absolute'}`); n++; } catch { /* left as it was */ } }
+    toast(`Switched the numbering of ${n} show${n === 1 ? '' : 's'}`); await loadFollowed();
+  });
   let linksWere = false;
   function renderLinkCheck() {
     const l = qstate.links;

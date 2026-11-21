@@ -150,6 +150,12 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .stage .btn{height:32px}
 /* "wcostream show is Sonarr season N" (21 Nov 2026): Pokémon and JoJo are one Sonarr series, a wcostream show per part. */
 .seasonpick{display:inline-flex;gap:8px;align-items:center;color:var(--text-2);font-size:13px}
+.noswap{display:inline-flex;gap:6px;align-items:center;color:var(--text-2);font-size:13px}
+.splitfiles{margin-top:8px;display:grid;gap:4px;font-size:13px}
+.splitfiles label{display:flex;gap:8px;align-items:baseline;min-width:0}
+.splitfiles .fn{overflow-wrap:anywhere}
+.splitfiles .why{color:var(--muted)}
+.splitfiles .btn{justify-self:start;margin-top:4px}
 .seasonpick select{height:32px;padding:0 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
 /* Last night (18 Nov 2026): the overnight summary the phone also gets, kept here once the message is swiped away. */
 .night{margin:0 0 32px;border:1px solid var(--line);border-radius:12px;background:var(--surface);scroll-margin-top:calc(var(--toph, 0px) + 16px)}

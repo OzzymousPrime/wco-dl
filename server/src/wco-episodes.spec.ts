@@ -186,3 +186,22 @@ describe("the site's duplicate marker is not a title (21 Nov 2026)", () => {
     expect(linkTitle('https://www.wcostream.tv/catdog-episode-23-siege-on-fort-catdog-english-dubbed-2')).toBe('siegeonfortcatdog');
   });
 });
+
+describe("a season link over a page with seasons of its own (22 Nov 2026: Stardust Crusaders)", () => {
+  it('runs the page\'s seasons on, and gives each episode its own page', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { runOnSources } = require('./wco-episodes.util');
+    const W = 'https://www.wcostream.tv/';
+    const l = buildListing([
+      ...[1, 2, 24].map((n) => `${W}jojo-stardust-crusaders-episode-${n}-english-dubbed`),
+      ...[1, 5, 24].map((n) => `${W}jojo-stardust-crusaders-season-2-episode-${n}-english-dubbed`)]);
+    const map = [1, 24, 25, 29, 48, 30].map((e) => ({ id: 100 + e, s: 2, e, abs: e }));
+    const src = runOnSources(l, map);
+    expect(src.get(101)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-episode-1-english-dubbed` });
+    expect(src.get(124)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-episode-24-english-dubbed` });
+    expect(src.get(125)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-season-2-episode-1-english-dubbed` });
+    expect(src.get(129)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-season-2-episode-5-english-dubbed` });
+    expect(src.get(148)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-season-2-episode-24-english-dubbed` });
+    expect(src.get(130)).toEqual({ kind: 'none', why: 'unlisted' });          // 2x06 on the site is not listed
+  });
+});

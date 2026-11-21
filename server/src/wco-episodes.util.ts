@@ -1,7 +1,7 @@
 // What wcostream lists for a show (12 Nov 2026): read from the show page, numbered the way the downloader numbers
 // them (Lifter.py download_show), so "listed here" and "the downloader can find it" mean the same thing.
 import * as cheerio from 'cheerio';
-import { normaliseTitle } from './fill.util';
+import { episodeName, normaliseTitle } from './fill.util';
 
 /** The classes the downloader looks for, in its order (Lifter.py EPISODE_LINK_CLASSES). */
 const CLASSES = ['sidebar-episode-item', 'dark-episode-item', 'sonra'];
@@ -188,6 +188,34 @@ export function resolveSources(l: WcoListing, all: EpisodeLike[], absolute: bool
     if (!titles[i] || !theirs.length || theirs.some((t) => alike(t, titles[i]) >= SAME)) { out.set(e.id, { kind: 'number' }); return; }
     out.set(e.id, { kind: 'none', why: 'different', got: theirs[0] });
   });
+  return out;
+}
+
+/**
+ * Sources for a link set to one Sonarr season whose wcostream page has seasons of its own (22 Nov 2026: Stardust
+ * Crusaders is JoJo's season 2, 48 episodes, but wcostream lists it as 1x01-1x24 and 2x01-2x24). The site's seasons run
+ * on: its season 2 episode 5 is the season's episode 29 (after the 24 of its season 1). Each episode gets its exact
+ * page, since the site's own number cannot ask for "episode 29". `map` is the season's view (episode N = abs N).
+ */
+export function runOnSources(l: WcoListing, map: EpisodeLike[]): Map<number, Source> {
+  const pages: { s: number; n: number; url: string }[] = [];
+  for (const url of l.links) {
+    const last = url.split('?')[0].replace(/\/+$/, '').split('/').pop() ?? '';
+    const ep = episodeName(last, true);
+    if (ep) pages.push({ s: ep.season ?? 1, n: ep.number, url });
+  }
+  const seasons = [...new Set(pages.map((x) => x.s))].sort((a, b) => a - b);
+  const top = new Map(seasons.map((k) => [k, Math.max(...pages.filter((x) => x.s === k).map((x) => x.n))]));
+  const start = new Map<number, number>();
+  let run = 0;
+  for (const k of seasons) { start.set(k, run); run += top.get(k)!; }
+  const byIndex = new Map<number, string>();
+  for (const x of pages) { const i = start.get(x.s)! + x.n; if (!byIndex.has(i)) byIndex.set(i, x.url); }
+  const out = new Map<number, Source>();
+  for (const e of map) {
+    const url = byIndex.get(e.e);
+    out.set(e.id, url ? { kind: 'title', url, ids: [e.id] } : { kind: 'none', why: 'unlisted' });
+  }
   return out;
 }
 

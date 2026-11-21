@@ -35,7 +35,7 @@ import { WcoVerdict } from './wco-health';
 
 const WCO_HELD = 'Until it reads again, downloads wait, no episode counts as missing from wcostream and none goes to Sonarr for that reason.';
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-import { fileIsEpisode, fileTitle, latestText, linkCheck, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, Source } from './wco-episodes.util';
+import { fileIsEpisode, fileTitle, latestText, linkCheck, linkTitle, numberingFit, NumberingFit, pickedBy, resolveSources, runOnSources, Source, WcoListing } from './wco-episodes.util';
 
 /**
  * The episode map's back end (11 Nov 2026): look a show up in Sonarr from its wco link, then fill the
@@ -93,6 +93,11 @@ export interface FillJob {
 
 /** Episodes to hand to Sonarr tonight, with the reason for the summary. `unlisted`: only while wcostream reads properly. */
 interface HandOff { slug: string; pref: ShowPref; eps: MapEpisode[]; why: string; unlisted?: boolean }
+
+/** Where each episode can be had from: a season link over a page with seasons of its own runs them on (22 Nov 2026). */
+export function sourcesFor(l: WcoListing, map: { id: number; s: number; e: number; abs?: number; t?: string }[], absolute: boolean, season?: number) {
+  return season && l.seasons.size > 1 ? runOnSources(l, map) : resolveSources(l, map, absolute);
+}
 
 /** One season of a series, numbered from 1 as a wcostream show of that season numbers it (21 Nov 2026). */
 export function seasonView<T extends { s: number; e: number; abs?: number }>(map: T[], season: number): T[] {
@@ -1055,7 +1060,7 @@ export class FillService implements OnApplicationBootstrap {
     if (listing) {
       try {
         const map = await this.mapEpisodes(job.seriesId, job.season);
-        source = resolveSources(listing, map, !!job.absolute).get(ep.id) ?? source;
+        source = sourcesFor(listing, map, !!job.absolute, job.season).get(ep.id) ?? source;
         if (source.kind === 'title') {
           // One file can hold several episodes. It is filed under this one and under the others that have no file;
           // an episode that already has a file keeps it.
@@ -1070,11 +1075,11 @@ export class FillService implements OnApplicationBootstrap {
       this.reread.add(job.id);
       try {
         const again = await this.wco.listing(job.slug, job.language ?? 'dub', true);
-        if (again && this.wcoVerdict().ok) source = resolveSources(again, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute).get(ep.id) ?? source;
+        if (again && this.wcoVerdict().ok) source = sourcesFor(again, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute, job.season).get(ep.id) ?? source;
       } catch { /* refused below */ }
     } else if (source.kind === 'none' && source.why === 'unlisted' && !job.auto && this.wco) {
       const cached = this.wco.peek(job.slug, job.language ?? 'dub');
-      if (cached) try { source = resolveSources(cached, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute).get(ep.id) ?? source; } catch { /* refused below */ }
+      if (cached) try { source = sourcesFor(cached, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute, job.season).get(ep.id) ?? source; } catch { /* refused below */ }
     }
     if (source.kind === 'none') {
       ep.state = 'failed';
@@ -1256,7 +1261,7 @@ export class FillService implements OnApplicationBootstrap {
       const check = linkCheck(listing, map, !s || matchSeries(slug, [s]).length > 0);
       if (!check.ok) return { wrong: check.why, onWco: 0 };
     }
-    const sources = resolveSources(listing, map, !!pref.absolute);
+    const sources = sourcesFor(listing, map, !!pref.absolute, pref.season);
     const work = map.filter((e) => e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub'));
     return { onWco: work.filter((e) => sources.get(e.id)?.kind !== 'none').length };
   }
@@ -1627,7 +1632,7 @@ export class FillService implements OnApplicationBootstrap {
     if (!this.wco || Date.now() > deadline) return due;
     const listing = await this.wco.listing(slug, pref.language ?? 'dub');
     if (!listing || !this.wcoVerdict().ok) return due;
-    const sources = resolveSources(listing, map, !!pref.absolute);
+    const sources = sourcesFor(listing, map, !!pref.absolute, pref.season);
     const gone = due.filter((id) => sources.get(id)?.kind === 'none');
     if (!gone.length) { delete pref.unlisted; return due; }
     const now = new Date().toISOString();
@@ -1700,7 +1705,7 @@ export class FillService implements OnApplicationBootstrap {
     const listing = await this.wco.listing(parsed.slug, language, freshParam === '1' || freshParam === 'true');
     if (!listing || !this.wcoVerdict().ok) return none;
     const map = await this.mapEpisodes(seriesId, season);
-    const sources = resolveSources(listing, map, absolute);
+    const sources = sourcesFor(listing, map, absolute, season);
     const picked = pickLink ? pickedBy(pickLink, map, sources, absolute) : undefined;
     const work = map.filter((e) => e.st === 'missing' || e.st === 'undub' || e.st === 'unknown');
     const gone = work.filter((e) => sources.get(e.id)?.kind === 'none');
@@ -1891,7 +1896,7 @@ export class FillService implements OnApplicationBootstrap {
         if (!due.length) continue;
         const listing = await this.wco.listing(slug, 'dub');
         if (!listing) continue;
-        const sources = resolveSources(listing, map, !!pref.absolute);
+        const sources = sourcesFor(listing, map, !!pref.absolute, pref.season);
         const there = due.filter((e) => { const s = sources.get(e.id); return !!s && s.kind !== 'none'; });
         if (there.length) found.push({ show: pref.title ?? slug, slug, seriesId, ids: there.map((e) => e.id), episodes: there.map((e) => `${e.s}x${pad(e.e)}`) });
       } catch (err) { this.logger.warn(`New-dub check for ${slug}: ${(err as Error).message}`); }

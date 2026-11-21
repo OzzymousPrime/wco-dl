@@ -177,3 +177,12 @@ describe('is the link this show at all (18 Nov 2026)', () => {
     expect(linkCheck(buildListing([]), mine, false).ok).toBe(true);
   });
 });
+
+describe("the site's duplicate marker is not a title (21 Nov 2026)", () => {
+  it('reads no title from "-english-dubbed-2-2" or a bare number, and keeps a real one', () => {
+    expect(linkTitle('https://www.wcostream.tv/one-piece-episode-195-english-dubbed-2-2')).toBe('');
+    expect(linkTitle('https://www.wcostream.tv/one-piece-episode-195-english-dubbed-2')).toBe('');
+    expect(linkTitle('https://www.wcostream.tv/some-show-episode-3-2')).toBe('');
+    expect(linkTitle('https://www.wcostream.tv/catdog-episode-23-siege-on-fort-catdog-english-dubbed-2')).toBe('siegeonfortcatdog');
+  });
+});

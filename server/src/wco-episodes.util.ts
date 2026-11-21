@@ -28,8 +28,10 @@ export interface WcoListing {
 export function linkTitle(url: string): string {
   const m = /episode-\d+-(.*?)\/?$/.exec(url.toLowerCase().split('?')[0]);
   if (!m) return '';
-  // "...-english-dubbed-2" is the site's own duplicate marker, not a title
-  return normaliseTitle(m[1].replace(/-?(english-)?(dubbed|subbed)(-\d+)?$/, '').replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ' '));
+  // "...-english-dubbed-2" (and "-2-2", 21 Nov 2026: 134 One Piece episodes read "2" as their title) is the site's own
+  // duplicate marker, not a title; nor is a title that is only digits.
+  const t = normaliseTitle(m[1].replace(/-?(english-)?(dubbed|subbed)(-\d+)*$/, '').replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ' '));
+  return /^\d*$/.test(t) ? '' : t;
 }
 /** A Sonarr title worth comparing: not empty, not "Episode 5" or "TBA". */
 export function realTitle(t: string): string {

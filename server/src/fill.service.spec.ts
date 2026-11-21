@@ -539,6 +539,28 @@ describe('FillService worker', () => {
     expect((svc as any).jobs[0].episodes[0].state).toBe('done');
   });
 
+  // 21 Nov 2026: Sonarr keeps JoJo and Pokémon as one series in many seasons; wcostream has a show per part, numbered from 1.
+  it('a link set to one Sonarr season plans only that season, numbered from 1', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { seasonView } = require('./fill.service');
+    expect(seasonView([{ id: 1, s: 1, e: 1, abs: 1 }, { id: 2, s: 2, e: 14, abs: 39 }, { id: 3, s: 2, e: 15, abs: 40 }], 2))
+      .toEqual([{ id: 2, s: 2, e: 14, abs: 14 }, { id: 3, s: 2, e: 15, abs: 15 }]);
+    const wco = { peek: () => undefined, listing: jest.fn().mockResolvedValue(buildListing([14, 15, 16].map((n) => `https://www.wcostream.tv/re-zero-part-two-episode-${n}-english-dubbed`))) };
+    const svc = new FillService((service as any).config, wco as any);
+    await svc.setFollow({ slug: 're-zero-part-two', seriesId: 575, follow: true, language: 'dub' });
+    await svc.linkIsRight({ slug: 're-zero-part-two' });
+    expect(await svc.setSeason({ slug: 're-zero-part-two', season: 2 })).toEqual({ slug: 're-zero-part-two', season: 2, absolute: true });
+    await svc.setPaused(true);
+    const made = await svc.nightlyPlan();
+    const job = made.find((j) => j.slug === 're-zero-part-two')!;
+    expect(job).toMatchObject({ season: 2, absolute: true });
+    expect(job.episodes.map((e) => [e.id, e.abs])).toEqual([[101, 14], [102, 15]]);   // 2x14 is the site's 14; 2x15 swaps to the dub
+    await expect(svc.setSeason({ slug: 're-zero-part-two', season: 0 })).rejects.toThrow(/whole number/);
+    expect(await svc.setSeason({ slug: 're-zero-part-two', season: null })).toMatchObject({ season: null, absolute: false });
+  });
+
   it('names why an episode failed, in a word', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { failureKind } = require('./fill.service');

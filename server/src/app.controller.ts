@@ -164,6 +164,13 @@ export class AppController {
     return this.fillService.checkLinks();
   }
 
+  /** "This wcostream show is Sonarr season N" (21 Nov 2026): { slug, season } or { slug, season: null }. */
+  @Post('links/season')
+  @UseGuards(JsonRequestGuard)
+  linkSeason(@Body() body: any) {
+    return this.fillService.setSeason(body);
+  }
+
   @Post('links/ok')
   @UseGuards(JsonRequestGuard)
   linkOk(@Body() body: any) {

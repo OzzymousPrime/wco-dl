@@ -83,6 +83,8 @@ export interface FillJob {
   auto?: boolean;
   /** Planned by "Fill now" (18 Nov 2026): an automatic run that starts straight away instead of waiting for the night. */
   now?: boolean;
+  /** The link's wcostream show is this Sonarr season (21 Nov 2026), numbered from 1 on the site. */
+  season?: number;
   /** Episodes in a row that wcostream's video server refused (see VIDEO_REFUSED). */
   refused?: number;
   /** Episodes a run summary has already counted (19 Nov 2026), so an episode parked past the night is told once, later. */
@@ -91,6 +93,11 @@ export interface FillJob {
 
 /** Episodes to hand to Sonarr tonight, with the reason for the summary. `unlisted`: only while wcostream reads properly. */
 interface HandOff { slug: string; pref: ShowPref; eps: MapEpisode[]; why: string; unlisted?: boolean }
+
+/** One season of a series, numbered from 1 as a wcostream show of that season numbers it (21 Nov 2026). */
+export function seasonView<T extends { s: number; e: number; abs?: number }>(map: T[], season: number): T[] {
+  return map.filter((e) => e.s === season).map((e) => ({ ...e, abs: e.e }));
+}
 
 /** Which handed-over episodes are searched for tonight: the newest `cap` by air date; the rest are only monitored. */
 export function newestIds(groups: { id: number; a?: string }[][], cap: number): Set<number> {
@@ -166,6 +173,12 @@ interface ShowPref {
   linkWrong?: { why: string; at: string };
   /** Someone said the link is right: the link check leaves it alone. */
   linkOk?: boolean;
+  /**
+   * The wcostream show is this one season of the Sonarr series (21 Nov 2026). Sonarr keeps Pokémon and JoJo as one
+   * series in many seasons; wcostream has a show per era or part, each numbered from 1. The link then sees only that
+   * season, and its episode N is that season's episode N (straight-through numbering, so `absolute` is set with it).
+   */
+  season?: number;
   /** Episodes the last night's plan found wcostream does not list (so were not queued). */
   unlisted?: { ids: number[]; at: string };
   /** From the last numbering check: how many episodes that need work the site lists under each way of numbering. */
@@ -469,7 +482,7 @@ export class FillService implements OnApplicationBootstrap {
   async recount() {
     const counted = new Map<string, { missing: number; undub: number; at: string }>();
     for (const [slug, pref] of Object.entries(await this.prefs())) {   // every linked show: the unfollowed ones hide gaps too
-      try { counted.set(slug, countMap(await this.mapEpisodes(pref.seriesId))); }
+      try { counted.set(slug, countMap(await this.mapEpisodes(pref.seriesId, pref.season))); }
       catch (err) { this.logger.warn(`Recount ${slug}: ${(err as Error).message}`); }
     }
     await this.changePrefs((prefs) => { for (const [slug, c] of counted) if (prefs[slug]) prefs[slug].counts = c; });
@@ -660,22 +673,28 @@ export class FillService implements OnApplicationBootstrap {
     }
     const series = all.find((s) => s.id === seriesId) ?? (await this.sonarr('get', `series/${seriesId}`));
     let absolute = prefs[parsed.slug]?.absolute ?? false;
-    if (absoluteParam !== undefined) absolute = absoluteParam === 'true';
+    if (absoluteParam !== undefined && !prefs[parsed.slug]?.season) absolute = absoluteParam === 'true';
     const slug = parsed.slug;
     let pref = prefs[slug];
     if (seriesIdParam || absoluteParam !== undefined || !pref) {
       const link = { seriesId, absolute, title: series.title as string };
-      pref = (await this.changePrefs((p) => { p[slug] = { ...p[slug], ...link }; }))[slug];
+      pref = (await this.changePrefs((p) => {
+        const was = p[slug];
+        // Another series or numbering: what wcostream was counted to have no longer holds (21 Nov 2026).
+        if (was?.counts && (was.seriesId !== seriesId || !!was.absolute !== absolute)) { delete was.counts.onWco; delete was.counts.wcoAt; }
+        p[slug] = { ...p[slug], ...link };
+      }))[slug];
       if (seriesIdParam || !prefs[slug]) this.checkLinks([slug]);     // a new link: checked at once (19 Nov 2026)
     }
-    const episodes = await this.mapEpisodes(seriesId);
+    const episodes = await this.mapEpisodes(seriesId, pref?.season);
     if (pref?.follow) {                 // keep the home list's counts fresh for a show that was just looked at
       const counts = countMap(episodes);
       await this.changePrefs((p) => { if (p[slug]) p[slug].counts = counts; });
     }
     return {
       slug: parsed.slug, language: parsed.language, series: brief(series), absolute,
-      follow: !!pref?.follow, followLanguage: pref?.language ?? 'dub',
+      follow: !!pref?.follow, followLanguage: pref?.language ?? 'dub', season: pref?.season,
+      seasons: [...new Set((await this.mapEpisodes(seriesId)).map((e) => e.s))],
       candidates: candidates.map(brief), episodes, split: (await this.splitFolders()).get(seriesId) ?? [],
       ...(pick ? { pick } : {}),
     };
@@ -704,7 +723,12 @@ export class FillService implements OnApplicationBootstrap {
       .map((s) => ({ id: s.id, title: s.title, year: s.year, path: s.path }));
   }
 
-  private async mapEpisodes(seriesId: number): Promise<MapEpisode[]> {
+  private async mapEpisodes(seriesId: number, season?: number): Promise<MapEpisode[]> {
+    const all = await this.mapAllEpisodes(seriesId);
+    return season ? seasonView(all, season) : all;
+  }
+
+  private async mapAllEpisodes(seriesId: number): Promise<MapEpisode[]> {
     const [eps, files] = await Promise.all([
       this.sonarr<any[]>('get', `episode?seriesId=${seriesId}`),
       this.sonarr<any[]>('get', `episodefile?seriesId=${seriesId}`),
@@ -749,7 +773,8 @@ export class FillService implements OnApplicationBootstrap {
     const slug = parseShowLink(String(body.slug ?? '')).slug;
     const language = body.language === 'dub' || body.language === 'sub' ? body.language : undefined;
     const quality = body.quality === '480' || body.quality === '1080' ? body.quality : SETTINGS.quality;
-    const map = await this.mapEpisodes(seriesId);
+    const season = (await this.prefs())[slug]?.season;
+    const map = await this.mapEpisodes(seriesId, season);
     const series = await this.sonarr('get', `series/${seriesId}`);
     // An automatic run never touches a file whose audio is not labelled; a person may pick one on the map.
     const swappable = (st: EpisodeStatus) => st === 'undub' || (st === 'unknown' && !body.auto);
@@ -759,7 +784,8 @@ export class FillService implements OnApplicationBootstrap {
     const picked = needed.filter((e) => !busy.has(e.id));
     if (!picked.length) throw new ConflictException('Those episodes are already in the queue');
     const job: FillJob = {
-      id: randomUUID(), seriesId, title: series.title, slug, language, quality, absolute: !!body.absolute, auto: !!body.auto, ...(body.auto && body.now ? { now: true } : {}),
+      id: randomUUID(), seriesId, title: series.title, slug, language, quality, absolute: !!body.absolute || !!season, auto: !!body.auto, ...(body.auto && body.now ? { now: true } : {}),
+      ...(season ? { season } : {}),
       createdAt: new Date().toISOString(),
       episodes: picked.map((e) => ({ id: e.id, s: e.s, e: e.e, abs: e.abs, title: e.t,
         mode: e.st === 'missing' ? 'missing' : 'swap', state: 'queued' })),
@@ -932,7 +958,7 @@ export class FillService implements OnApplicationBootstrap {
     const listing = read && this.wcoVerdict().ok ? read : undefined;
     if (listing) {
       try {
-        const map = await this.mapEpisodes(job.seriesId);
+        const map = await this.mapEpisodes(job.seriesId, job.season);
         source = resolveSources(listing, map, !!job.absolute).get(ep.id) ?? source;
         if (source.kind === 'title') {
           // One file can hold several episodes. It is filed under this one and under the others that have no file;
@@ -948,11 +974,11 @@ export class FillService implements OnApplicationBootstrap {
       this.reread.add(job.id);
       try {
         const again = await this.wco.listing(job.slug, job.language ?? 'dub', true);
-        if (again && this.wcoVerdict().ok) source = resolveSources(again, await this.mapEpisodes(job.seriesId), !!job.absolute).get(ep.id) ?? source;
+        if (again && this.wcoVerdict().ok) source = resolveSources(again, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute).get(ep.id) ?? source;
       } catch { /* refused below */ }
     } else if (source.kind === 'none' && source.why === 'unlisted' && !job.auto && this.wco) {
       const cached = this.wco.peek(job.slug, job.language ?? 'dub');
-      if (cached) try { source = resolveSources(cached, await this.mapEpisodes(job.seriesId), !!job.absolute).get(ep.id) ?? source; } catch { /* refused below */ }
+      if (cached) try { source = resolveSources(cached, await this.mapEpisodes(job.seriesId, job.season), !!job.absolute).get(ep.id) ?? source; } catch { /* refused below */ }
     }
     if (source.kind === 'none') {
       ep.state = 'failed';
@@ -1160,7 +1186,7 @@ export class FillService implements OnApplicationBootstrap {
       for (const slug of list) {
         try {
           const pref = prefs[slug];
-          const map = await this.mapEpisodes(pref.seriesId);
+          const map = await this.mapEpisodes(pref.seriesId, pref.season);
           const v = await this.linkVerdict(slug, pref, map, series);
           if (v) {
             if (v.wrong) run.wrong++;
@@ -1178,6 +1204,26 @@ export class FillService implements OnApplicationBootstrap {
     if (!slugs && this.linkProgress()) return { started: false, total: this.linkRun!.total };
     this.linkQueue = this.linkQueue.then(go, go);
     return { started: true, total: slugs?.length ?? -1 };
+  }
+
+  /**
+   * "This wcostream show is Sonarr season N" (21 Nov 2026), or the whole series again (season null). Straight-through
+   * numbering comes with a season; the link is checked again at once.
+   */
+  async setSeason(body: { slug?: string; season?: number | null }) {
+    let slug: string;
+    try { slug = parseShowLink(String(body?.slug ?? '')).slug; } catch (e) { throw new BadRequestException((e as Error).message); }
+    const season = body?.season === null || body?.season === undefined ? undefined : Number(body.season);
+    if (season !== undefined && !(Number.isInteger(season) && season > 0)) throw new BadRequestException('A season is a whole number from 1');
+    const prefs = await this.changePrefs((p) => {
+      const pref = p[slug]; if (!pref) return;
+      if (season) { pref.season = season; pref.absolute = true; } else if (pref.season) { delete pref.season; pref.absolute = false; }
+      delete pref.unlisted; delete pref.linkWrong;
+      if (pref.counts) { delete pref.counts.onWco; delete pref.counts.wcoAt; }    // counted under the old numbering
+    });
+    if (!prefs[slug]) throw new NotFoundException('That show is not linked');
+    this.checkLinks([slug]);
+    return { slug, season: prefs[slug].season ?? null, absolute: !!prefs[slug].absolute };
   }
 
   /** Mark the link of a show right ("The link is right"): the link check leaves it alone from now on. */
@@ -1368,7 +1414,7 @@ export class FillService implements OnApplicationBootstrap {
     const recentDay = new Date(Date.now() - NEW_DUB_DAYS * 86400000).toISOString().slice(0, 10);
     for (const [slug, pref] of Object.entries(prefs).filter(([, p]) => p.follow)) {
       try {
-        const map = await this.mapEpisodes(pref.seriesId);
+        const map = await this.mapEpisodes(pref.seriesId, pref.season);
         const last = pref.counts;
         pref.counts = countMap(map);
         const tries = (pref.tries ??= {});
@@ -1507,7 +1553,7 @@ export class FillService implements OnApplicationBootstrap {
           try {
             const pref = (await this.prefs())[slug];
             if (pref) {
-              const map = await this.mapEpisodes(pref.seriesId);
+              const map = await this.mapEpisodes(pref.seriesId, pref.season);
               const work = new Set(map.filter((e) => e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub')).map((e) => e.id));
               const listing = work.size ? await this.wco!.listing(slug, pref.language ?? 'dub') : undefined;
               await this.changePrefs((fresh) => {
@@ -1546,10 +1592,11 @@ export class FillService implements OnApplicationBootstrap {
     const seriesId = seriesIdParam ? Number(seriesIdParam) : prefs[parsed.slug]?.seriesId;
     if (!seriesId) return none;
     const language = langParam === 'sub' || langParam === 'dub' ? langParam : prefs[parsed.slug]?.language ?? 'dub';
-    const absolute = absoluteParam !== undefined ? absoluteParam === 'true' : !!prefs[parsed.slug]?.absolute;
+    const season = prefs[parsed.slug]?.seriesId === seriesId ? prefs[parsed.slug]?.season : undefined;
+    const absolute = season ? true : absoluteParam !== undefined ? absoluteParam === 'true' : !!prefs[parsed.slug]?.absolute;
     const listing = await this.wco.listing(parsed.slug, language, freshParam === '1' || freshParam === 'true');
     if (!listing || !this.wcoVerdict().ok) return none;
-    const map = await this.mapEpisodes(seriesId);
+    const map = await this.mapEpisodes(seriesId, season);
     const sources = resolveSources(listing, map, absolute);
     const picked = pickLink ? pickedBy(pickLink, map, sources, absolute) : undefined;
     const work = map.filter((e) => e.st === 'missing' || e.st === 'undub' || e.st === 'unknown');
@@ -1736,7 +1783,7 @@ export class FillService implements OnApplicationBootstrap {
       const [slug, pref] = bySeries.get(seriesId)!;
       try {
         const told = new Set(pref.announced ?? []);
-        const map = await this.mapEpisodes(seriesId);
+        const map = await this.mapEpisodes(seriesId, pref.season);
         const due = map.filter((e) => (e.st === 'missing' || e.st === 'undub') && !told.has(e.id) && day(e.a) >= from.getTime() && day(e.a) <= now.getTime());
         if (!due.length) continue;
         const listing = await this.wco.listing(slug, 'dub');

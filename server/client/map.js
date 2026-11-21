@@ -130,6 +130,7 @@
         view = 'show';
         $('picker').hidden = true;
         setSeg('numbering', String(!!show.absolute));
+        setSeasonPick();
         setFollow(!!show.follow);
         if (!same && !cold) $('show').hidden = false;   // the glide is the entrance; the rise is for a first load
         renderShow();
@@ -240,6 +241,27 @@
     const tv = ev.target.closest('[data-tvdb]'); if (tv) { if (!tv.disabled) addToSonarr(tv, +tv.dataset.tvdb); return; }
     const b = ev.target.closest('[data-slug]'); if (!b || b.disabled) return;
     setSeg('lang', b.dataset.lang); openShow(b.dataset.slug);
+  });
+
+  // Which part of the Sonarr series this wcostream show is (21 Nov 2026): the whole series, or one season numbered
+  // from 1 (wcostream's Horizons is Pokémon's season 20; Steel Ball Run is JoJo's season 6). Offered when Sonarr has
+  // more than one season; with a season set the numbering is straight through, so its switch is hidden.
+  function setSeasonPick() {
+    const seasons = (show?.seasons || []).filter((n) => n > 0);
+    $('seasonpick').hidden = !show?.series || (seasons.length < 2 && !show.season);
+    $('numbering').hidden = !!show?.season;
+    if ($('seasonpick').hidden) return;
+    $('seasonsel').innerHTML = `<option value="">the whole series</option>` + seasons.map((n) => `<option value="${n}"${show.season === n ? ' selected' : ''}>Sonarr season ${n}</option>`).join('');
+  }
+  $('seasonsel').addEventListener('change', async () => {
+    const v = $('seasonsel').value, season = v ? Number(v) : null;
+    $('seasonsel').disabled = true;
+    try {
+      await api('POST', '/links/season', { slug: show.slug, season });
+      toast(season ? `This wcostream show is now Sonarr season ${season}: its episode 1 is ${season}x01` : 'This wcostream show is the whole series again');
+      await openShow(link, { push: false });
+    } catch (e) { status(`Could not change it: ${e.message}`, true); }
+    $('seasonsel').disabled = false;
   });
 
   function setSeg(id, v) { $(id).querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }

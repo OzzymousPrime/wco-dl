@@ -625,10 +625,15 @@ export class FillService implements OnApplicationBootstrap {
     const byId = new Map(map.map((e) => [e.id, e]));
     const out: { folder: string; path: string; name: string; episodes: { id: number; s: number; e: number; t: string }[]; ok: boolean; why: string; raw: any }[] = [];
     const claimed = new Set<number>();                       // one file per episode: the first that can be imported
+    // Only the second folder itself: given a series id, Sonarr scans that series' own folder instead (22 Nov 2026: 787
+    // of the "duplicates" listed were Sonarr's own files). A file inside the show's own folder is never offered.
+    const own = String((await this.sonarr<any>('get', `series/${seriesId}`).catch(() => ({})))?.path ?? '').replace(/[\\/]+$/, '').toLowerCase();
+    const inside = (p: string, dir: string) => { const a = p.replace(/\//g, '\\').toLowerCase(), d = dir.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase(); return !!d && a.startsWith(d + '\\'); };
     for (const folder of folders) {
-      const cands = await this.sonarr<any[]>('get', `manualimport?folder=${encodeURIComponent(folder)}&seriesId=${seriesId}&filterExistingFiles=true`);
+      const cands = await this.sonarr<any[]>('get', `manualimport?folder=${encodeURIComponent(folder)}&filterExistingFiles=true`);
       for (const c of cands ?? []) {
         if (!VIDEO.test(String(c.path))) continue;
+        if (!inside(String(c.path), folder) || (own && inside(String(c.path), own))) continue;
         let eps = (c.episodes ?? []).map((e: any) => byId.get(e.id)).filter(Boolean) as MapEpisode[];
         // Sonarr did not place it, often for want of the show's name ("Rezero Starting Life In Another World-S03E03-
         // English Dubbed.mp4", an old wco-dl download): the SxxEyy in the name says which episode (22 Nov 2026).

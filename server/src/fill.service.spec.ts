@@ -586,7 +586,10 @@ describe('FillService worker', () => {
       { id: 101, s: 2, e: 14, t: 'Straight Bet', st: sent.length ? 'dub' : 'missing' }, { id: 102, s: 2, e: 15, t: 'Otto Suwen', st: 'undub' },
       { id: 103, s: 2, e: 16, t: 'Bonds of Lust', st: sent.length ? 'dub' : 'missing' }];
     (svc as any).sonarr = jest.fn(async (method: string, url: string, data?: any) => {
+      if (url.startsWith('series/')) return { id: 575, path: 'E:/TV/Re Zero' };
+      if (url.startsWith('manualimport?')) { expect(url).not.toMatch(/seriesId/); }   // given a series, Sonarr scans its own folder instead
       if (url.startsWith('manualimport?')) return [
+        { path: 'E:/TV/Re Zero/Season 2/Re Zero - 2x14.mkv', folderName: 'Season 2', quality: { q: 1 }, episodes: [{ id: 101 }] },   // Sonarr's own file: never offered
         { path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 101 }] },
         { path: 'E:/TV/Re Zero (old)/Re Zero - 2x15.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 102 }] },
         { path: 'E:/TV/Re Zero (old)/notes.txt', episodes: [] },

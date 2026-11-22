@@ -624,13 +624,23 @@ export class FillService implements OnApplicationBootstrap {
     const map = await this.mapEpisodes(seriesId);
     const byId = new Map(map.map((e) => [e.id, e]));
     const out: { folder: string; path: string; name: string; episodes: { id: number; s: number; e: number; t: string }[]; ok: boolean; why: string; raw: any }[] = [];
+    const claimed = new Set<number>();                       // one file per episode: the first that can be imported
     for (const folder of folders) {
       const cands = await this.sonarr<any[]>('get', `manualimport?folder=${encodeURIComponent(folder)}&seriesId=${seriesId}&filterExistingFiles=true`);
       for (const c of cands ?? []) {
         if (!VIDEO.test(String(c.path))) continue;
-        const eps = (c.episodes ?? []).map((e: any) => byId.get(e.id)).filter(Boolean) as MapEpisode[];
+        let eps = (c.episodes ?? []).map((e: any) => byId.get(e.id)).filter(Boolean) as MapEpisode[];
+        // Sonarr did not place it, often for want of the show's name ("Rezero Starting Life In Another World-S03E03-
+        // English Dubbed.mp4", an old wco-dl download): the SxxEyy in the name says which episode (22 Nov 2026).
+        if (!eps.length) {
+          const m = /S(\d{1,2})E(\d{1,3})(?!\d)/i.exec(String(c.path).split(/[\\/]/).pop() ?? '');
+          const hit = m ? map.find((e) => e.s === Number(m[1]) && e.e === Number(m[2])) : undefined;
+          if (hit) eps = [hit];
+        }
         const why = !eps.length ? 'Sonarr cannot tell which episode this is'
-          : eps.some((e) => e.st !== 'missing' && e.st !== 'future') ? 'that episode has a file already' : '';
+          : eps.some((e) => e.st !== 'missing' && e.st !== 'future') ? 'that episode has a file already'
+          : eps.some((e) => claimed.has(e.id)) ? 'another file here is that episode' : '';
+        if (!why) eps.forEach((e) => claimed.add(e.id));
         out.push({ folder, path: c.path, name: String(c.path).split(/[\\/]/).pop() ?? '', episodes: eps.map((e) => ({ id: e.id, s: e.s, e: e.e, t: e.t })), ok: !why, why, raw: c });
       }
     }

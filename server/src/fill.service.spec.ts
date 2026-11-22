@@ -583,25 +583,31 @@ describe('FillService worker', () => {
     (svc as any).splitFolders = async () => new Map([[575, ['E:/TV/Re Zero (old)']]]);
     const sent: any[] = [];
     (svc as any).mapEpisodes = async () => [                           // 2x14 has a file once the import was sent
-      { id: 101, s: 2, e: 14, t: 'Straight Bet', st: sent.length ? 'dub' : 'missing' }, { id: 102, s: 2, e: 15, t: 'Otto Suwen', st: 'undub' }];
+      { id: 101, s: 2, e: 14, t: 'Straight Bet', st: sent.length ? 'dub' : 'missing' }, { id: 102, s: 2, e: 15, t: 'Otto Suwen', st: 'undub' },
+      { id: 103, s: 2, e: 16, t: 'Bonds of Lust', st: sent.length ? 'dub' : 'missing' }];
     (svc as any).sonarr = jest.fn(async (method: string, url: string, data?: any) => {
       if (url.startsWith('manualimport?')) return [
         { path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 101 }] },
         { path: 'E:/TV/Re Zero (old)/Re Zero - 2x15.mkv', folderName: 'Re Zero (old)', quality: { q: 1 }, episodes: [{ id: 102 }] },
         { path: 'E:/TV/Re Zero (old)/notes.txt', episodes: [] },
-        { path: 'E:/TV/Re Zero (old)/Extra.mp4', episodes: [] }];
+        { path: 'E:/TV/Re Zero (old)/Extra.mp4', episodes: [] },
+        { path: 'E:/TV/Re Zero (old)/Rezero-S02E14-English Dubbed.mp4', folderName: 'Re Zero (old)', episodes: [] },
+        { path: 'E:/TV/Re Zero (old)/Rezero-S02E16-English Dubbed.mp4', folderName: 'Re Zero (old)', episodes: [] }];
       if (url === 'command') { sent.push(data); return { id: 9 }; }
       if (url.startsWith('command/')) return { status: 'completed' };
       return {};
     });
     const files = await svc.splitFiles(575);
     expect(files.map((f) => [f.name, f.ok, f.why])).toEqual([
-      ['Re Zero - 2x14.mkv', true, ''], ['Re Zero - 2x15.mkv', false, 'that episode has a file already'], ['Extra.mp4', false, 'Sonarr cannot tell which episode this is']]);
+      ['Re Zero - 2x14.mkv', true, ''], ['Re Zero - 2x15.mkv', false, 'that episode has a file already'], ['Extra.mp4', false, 'Sonarr cannot tell which episode this is'],
+      ['Rezero-S02E14-English Dubbed.mp4', false, 'another file here is that episode'],   // one file per episode
+      ['Rezero-S02E16-English Dubbed.mp4', true, '']]);                     // placed by its SxxEyy when Sonarr cannot
     jest.spyOn(global, 'setTimeout').mockImplementation(((fn: any) => { fn(); return 0 as any; }) as any);
     const r = await svc.importSplit({ seriesId: 575, paths: files.map((f) => f.path) });
     (global.setTimeout as any).mockRestore?.();
-    expect(r).toMatchObject({ imported: 1, asked: 1, status: 'completed' });
-    expect(sent[0]).toMatchObject({ name: 'ManualImport', importMode: 'move', files: [{ path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', seriesId: 575, episodeIds: [101] }] });
+    expect(r).toMatchObject({ imported: 2, asked: 2, status: 'completed' });
+    expect(sent[0]).toMatchObject({ name: 'ManualImport', importMode: 'move', files: [{ path: 'E:/TV/Re Zero (old)/Re Zero - 2x14.mkv', seriesId: 575, episodeIds: [101] },
+      { path: 'E:/TV/Re Zero (old)/Rezero-S02E16-English Dubbed.mp4', seriesId: 575, episodeIds: [103] }] });
     await expect(svc.importSplit({ seriesId: 575, paths: [] })).rejects.toThrow(/Pick the files/);
   });
 

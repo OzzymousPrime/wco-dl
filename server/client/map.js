@@ -1001,6 +1001,7 @@
       const a = act.get(x.seriesId);
       const marks = (x.language === 'sub' ? '<span class="tag">sub</span>' : '') +
         (x.switchTo ? `<span class="tag" title="Numbered ${x.switchTo === 'absolute' ? 'straight through' : 'by season'}, wcostream would supply more of this show's missing episodes. Open the show to switch.">check numbering</span>` : '') +
+        (x.resting ? `<span class="tag" title="wcostream's video server refuses this show: its missing episodes went to Sonarr, and it is tried again after the rest">videos refused, resting to ${new Date(x.resting).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>` : '') +
         (x.linkWrong ? `<span class="tag gapmark" title="The overnight run leaves it out: ${esc(x.linkWrong)}">wrong link?</span>` : '') +
         (!x.linkWrong && needs(x) && x.onWco === 0 ? `<span class="tag" title="Last time wcostream was read it listed none of this show's missing episodes. Sonarr gets them as they become due; wcostream is read again every few days.">none on wcostream</span>`
           : !x.linkWrong && needs(x) && x.onWco > 0 && x.onWco < (x.missing || 0) + (x.undub || 0) ? `<span class="tag" title="Last time wcostream was read it listed ${x.onWco} of the episodes this show needs">${x.onWco} on wcostream</span>`

@@ -190,10 +190,20 @@ interface ShowPref {
   numbering?: NumberingFit & { at: string };
   /** Episodes already announced as new on wcostream in English (the new-dub check), so each is told once. */
   announced?: number[];
+  /** Its videos were found dead (most attempts refused): not planned until then (22 Nov 2026). */
+  deadUntil?: string;
   /** Never swap this show's files for the dub (22 Nov 2026: Minuscule has no dialogue, so "undubbed" means nothing). */
   noSwap?: boolean;
 }
 interface ShowPrefs { [slug: string]: ShowPref }
+/** Episode id -> handed to Sonarr when, for which show, and when Sonarr had a file for it. */
+interface Handoffs { [episodeId: string]: { slug: string; title: string; at: string; found?: string } }
+/** "Sonarr has found 41 of the 60 handed to it from 1 to 8 weeks ago": what the Monday summary says (22 Nov 2026). */
+export function handoffReport(h: Handoffs, now = Date.now()): { handed: number; found: number } | undefined {
+  const from = now - 56 * 86400000, to = now - 7 * 86400000;
+  const rows = Object.values(h).filter((x) => { const t = new Date(x.at).getTime(); return t >= from && t <= to; });
+  return rows.length ? { handed: rows.length, found: rows.filter((x) => x.found).length } : undefined;
+}
 /**
  * One episode's attempts. `dead`: nights on which the video could not be had (the video server refused it, or the
  * page had no player, 18 Nov 2026); on the second such night the episode goes to Sonarr instead of four tries.
@@ -257,6 +267,21 @@ export const UNLISTED_HAND_DAYS = 14;
  * The rest are picked up by Sonarr's own feed checks, or its "Search all missing".
  */
 export const HAND_SEARCH_PER_NIGHT = 60;
+/** A show whose video server refuses at least this many episodes, with none downloaded in a week, goes to Sonarr whole. */
+export const DEAD_SHOW_EPISODES = 5;
+/** ...and is not planned for this many days, then tried again. */
+export const DEAD_SHOW_REST_DAYS = 14;
+/**
+ * Is wcostream's video server refusing this show as a whole (22 Nov 2026: Hello Ninja, Hercules, Blood Blockade
+ * Battlefront and others failed every night one episode at a time)? At least DEAD_SHOW_EPISODES of its episodes have
+ * had a dead night, and none of its runs downloaded anything in the last week.
+ */
+export function showVideosDead(map: { id: number }[], tries: Record<string, { dead?: { n: number } }>, runs: FillJob[], now = Date.now()): boolean {
+  const deadEps = map.filter((e) => (tries[e.id]?.dead?.n ?? 0) >= 1).length;
+  if (deadEps < DEAD_SHOW_EPISODES) return false;
+  const week = now - 7 * 86400000;
+  return !runs.some((j) => new Date(j.createdAt).getTime() > week && j.episodes.some((e) => e.state === 'done'));
+}
 /** A followed show of which wcostream lists none of the missing episodes is read again after this many days, or when one airs. */
 export const NONE_ON_WCO_DAYS = 3;
 /** The kinds of failure in words, for the summary and the home screen. */
@@ -304,6 +329,10 @@ export class FillService implements OnApplicationBootstrap {
   private get configDir() { return this.config.configDir; }
   private get jobsFile() { return path.join(this.configDir, 'fill-jobs.json'); }
   private get prefsFile() { return path.join(this.configDir, 'show-prefs.json'); }
+  /** Every episode handed to Sonarr, and when Sonarr found it (22 Nov 2026): did the hand-offs work? */
+  private get handoffsFile() { return path.join(this.configDir, 'sonarr-handoffs.json'); }
+  private handoffStore?: JsonFileStore<Handoffs>;
+  private handoffs() { return (this.handoffStore ??= new JsonFileStore<Handoffs>(this.handoffsFile, () => ({}), (m) => this.logger.warn(m))); }
   private get stateFile() { return path.join(this.configDir, 'queue-state.json'); }
   private get settingsFile() { return path.join(this.configDir, 'settings.json'); }
 
@@ -691,6 +720,8 @@ export class FillService implements OnApplicationBootstrap {
     const series = await this.sonarr<any>('get', `series/${pref.seriesId}`);
     if (!series.monitored) await this.sonarr('put', `series/${pref.seriesId}`, { ...series, monitored: true });
     if (ids.length) await this.handToSonarr(ids, ids.length <= HAND_SEARCH_PER_NIGHT);
+    const at = new Date().toISOString();
+    await this.handoffs().update((h) => { for (const id of ids) h[id] = { slug, title: pref.title ?? slug, at }; }).catch(() => undefined);
     await this.changePrefs((p) => { if (p[slug]) p[slug].follow = false; });
     return { slug, monitored: ids.length, searched: ids.length <= HAND_SEARCH_PER_NIGHT ? ids.length : 0, seriesMonitored: true };
   }
@@ -1504,7 +1535,8 @@ export class FillService implements OnApplicationBootstrap {
         missing: p.counts?.missing ?? (st && !p.season ? Math.max(0, st[0] - st[1]) : undefined),
         undub: p.language === 'sub' || p.noSwap ? 0 : p.counts?.undub, countedAt: p.counts?.at, split: facts?.split[p.seriesId] ?? [],
         unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p),
-        onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why, noSwap: !!p.noSwap, season: p.season };
+        onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why, noSwap: !!p.noSwap, season: p.season,
+        resting: p.deadUntil && p.deadUntil > new Date().toISOString() ? p.deadUntil : undefined };
     });
   }
 
@@ -1528,19 +1560,31 @@ export class FillService implements OnApplicationBootstrap {
     let budget = SETTINGS.nightBudget;
     // Every followed show is looked at (and counted) first; then the shows with the fewest episodes due are queued
     // first, so new weekly episodes and nearly complete shows are not stuck behind a 200-episode backlog.
-    const plans: { slug: string; pref: ShowPref; due: number[] }[] = [];
+    const plans: { slug: string; pref: ShowPref; due: number[]; recent: number }[] = [];
     const deadline = Date.now() + 30 * 60 * 1000;      // reading wcostream's lists must not eat the night
     const handOff: HandOff[] = [];
     const got = this.config.sonarrApiKey ? await this.allSeriesNow().catch(() => undefined) : undefined;
     const series: any[] = Array.isArray(got) ? got : [];     // without the list, the names are not compared
     const recentDay = new Date(Date.now() - NEW_DUB_DAYS * 86400000).toISOString().slice(0, 10);
+    const handed = await this.handoffs().read().catch(() => ({} as Handoffs));
+    const foundNow: number[] = [];
     for (const [slug, pref] of Object.entries(prefs).filter(([, p]) => p.follow)) {
       try {
         const map = await this.mapEpisodes(pref.seriesId, pref.season);
+        for (const e of map) if (handed[e.id] && !handed[e.id].found && e.st !== 'missing' && e.st !== 'future') foundNow.push(e.id);
         const last = pref.counts;
         pref.counts = countMap(map);
         if (pref.noSwap) pref.counts.undub = 0;
         const tries = (pref.tries ??= {});
+        // Resting after its videos were found dead: left alone until the rest is over, then tried again once.
+        if (pref.deadUntil && pref.deadUntil > new Date().toISOString()) continue;
+        if (pref.deadUntil) delete pref.deadUntil;
+        if (showVideosDead(map, tries, this.jobs.filter((j) => j.slug === slug))) {
+          const eps = map.filter((e) => e.st === 'missing' && !tries[e.id]?.handedToSonarr);
+          if (eps.length) handOff.push({ slug, pref, eps, why: `wcostream's video server refuses this show (${DEAD_SHOW_EPISODES} or more episodes, none downloaded in a week); rested ${DEAD_SHOW_REST_DAYS} days` });
+          pref.deadUntil = new Date(Date.now() + DEAD_SHOW_REST_DAYS * 86400000).toISOString();
+          continue;
+        }
         const due: number[] = [], gaveUp: MapEpisode[] = [], dead: MapEpisode[] = [];
         for (const e of map) {
           const work = e.st === 'missing' || (e.st === 'undub' && pref.language !== 'sub' && !pref.noSwap);
@@ -1571,7 +1615,11 @@ export class FillService implements OnApplicationBootstrap {
           if (v) { delete pref.linkWrong; Object.assign(pref.counts, { onWco: v.onWco, wcoAt: new Date().toISOString() }); }
         }
         const kept = await this.dropUnlisted(slug, pref, map, due, tries, deadline, handOff);
-        if (kept.length) plans.push({ slug, pref, due: kept });
+        // New episodes first (aired in the last three weeks), newest first; then the backlog in the site's order.
+        const aired = new Map(map.map((e) => [e.id, e.a ?? '']));
+        const isRecent = (id: number) => (aired.get(id) ?? '') >= recentDay;
+        const ordered = [...kept.filter(isRecent).sort((a, b) => (aired.get(b) ?? '').localeCompare(aired.get(a) ?? '')), ...kept.filter((id) => !isRecent(id))];
+        if (kept.length) plans.push({ slug, pref, due: ordered, recent: kept.filter(isRecent).length });
       } catch (err) {
         this.logger.warn(`Nightly plan for ${slug}: ${(err as Error).message}`);
       }
@@ -1589,6 +1637,8 @@ export class FillService implements OnApplicationBootstrap {
         if (find.length) await this.handToSonarr(find.map((e) => e.id));
         if (rest.length) await this.handToSonarr(rest.map((e) => e.id), false);
         searches += find.length; unsearched += rest.length;
+        const at = new Date().toISOString();
+        await this.handoffs().update((h) => { for (const e of eps) h[e.id] = { slug, title: pref.title ?? slug, at }; }).catch(() => undefined);
         for (const e of eps) pref.tries![e.id] = { ...pref.tries![e.id], n: pref.tries![e.id]?.n ?? 0, last: pref.tries![e.id]?.last ?? new Date().toISOString(), handedToSonarr: true };
         const codes = eps.map((e) => `${e.s}x${pad(e.e)}`);
         this.nightNotes.push(`${pref.title ?? slug} ${codes.length <= 4 ? codes.join(', ') : `${codes.length} episodes, ${codes[0]} to ${codes[codes.length - 1]}`}: ` +
@@ -1598,7 +1648,14 @@ export class FillService implements OnApplicationBootstrap {
       }
     }
     if (unsearched) this.logger.log(`Handed to Sonarr: ${searches} searched for, ${unsearched} monitored only (at most ${HAND_SEARCH_PER_NIGHT} searches a night)`);
-    plans.sort((a, b) => a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
+    if (foundNow.length) await this.handoffs().update((h) => { const at = new Date().toISOString(); for (const id of foundNow) if (h[id]) h[id].found = at; }).catch(() => undefined);
+    if (new Date().getDay() === 1) {                     // Mondays: how the hand-offs went
+      const r = handoffReport(await this.handoffs().read().catch(() => ({} as Handoffs)));
+      if (r) this.nightNotes.push(`Sonarr has found ${r.found} of the ${r.handed} episodes handed to it 1 to 8 weeks ago`);
+    }
+    // Shows with new episodes first (22 Nov 2026: 350 followed shows and about 2,000 due against 120 a night buried new
+    // weekly episodes behind backlogs), then the fewest due, then the longest since last planned.
+    plans.sort((a, b) => Number(b.recent > 0) - Number(a.recent > 0) || a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
     for (const { slug, pref, due } of plans) {
       if (budget <= 0) break;
       try {
@@ -1626,6 +1683,7 @@ export class FillService implements OnApplicationBootstrap {
           now.tries = mine.tries;
         }
         if (mine.linkWrong && !now.linkOk) now.linkWrong = mine.linkWrong; else delete now.linkWrong;
+        if (mine.deadUntil) now.deadUntil = mine.deadUntil; else delete now.deadUntil;
         if (mine.lastPlanned) now.lastPlanned = mine.lastPlanned;
         if (mine.unlisted) now.unlisted = mine.unlisted; else delete now.unlisted;
       }

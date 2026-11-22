@@ -651,6 +651,75 @@ describe('FillService worker', () => {
     expect((await (svc as any).prefs())['gone-show'].follow).toBe(false);
   });
 
+  // 22 Nov 2026: 350 followed shows; new weekly episodes were buried behind backlogs, and dead shows failed nightly.
+  it('says a show is dead when five episodes had dead nights and nothing downloaded in a week', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { showVideosDead } = require('./fill.service');
+    const map = [1, 2, 3, 4, 5, 6].map((id) => ({ id }));
+    const tries: any = {}; for (const id of [1, 2, 3, 4, 5]) tries[id] = { n: 1, last: '', dead: { n: 1, day: 'x' } };
+    const now = Date.now(), recent = new Date(now - 86400000).toISOString();
+    expect(showVideosDead(map, tries, [{ createdAt: recent, episodes: [{ state: 'failed' }] }] as any, now)).toBe(true);
+    expect(showVideosDead(map, tries, [{ createdAt: recent, episodes: [{ state: 'done' }] }] as any, now)).toBe(false);   // something came through
+    delete tries[5];
+    expect(showVideosDead(map, tries, [], now)).toBe(false);                                                               // only four
+  });
+
+  it('hands a dead show to Sonarr whole and rests it', async () => {
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 'dead-show', seriesId: 575, follow: true, language: 'dub' });
+    const eps = [1, 2, 3, 4, 5, 6].map((n) => ({ id: 900 + n, s: 1, e: n, t: 'x', a: '2020-01-0' + n, st: 'missing' }));
+    (svc as any).mapEpisodes = async () => eps;
+    await (svc as any).changePrefs((p: any) => {
+      p['dead-show'].tries = {};
+      for (const e of eps.slice(0, 5)) p['dead-show'].tries[e.id] = { n: 1, last: '2026-11-20T01:00:00Z', dead: { n: 1, day: 'x' } };
+    });
+    (svc as any).jobs = [];
+    await svc.setPaused(true);
+    expect(await svc.nightlyPlan()).toEqual([]);                       // nothing queued for it
+    const search = calls.filter((c) => c.data?.name === 'EpisodeSearch').pop();
+    expect(search!.data.episodeIds.sort()).toEqual(eps.map((e) => e.id));   // all six missing go to Sonarr
+    const pref = (await (svc as any).prefs())['dead-show'];
+    expect(new Date(pref.deadUntil).getTime()).toBeGreaterThan(Date.now() + 13 * 86400000);
+    expect((await svc.followed()).find((x) => x.slug === 'dead-show')!.resting).toBe(pref.deadUntil);
+    expect(await svc.nightlyPlan()).toEqual([]);                       // resting: not looked at again
+  });
+
+  it('plans a show with new episodes before backlogs, and its new episodes first', async () => {
+    const svc = new FillService((service as any).config);
+    const day = (d: number) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+    await (svc as any).changePrefs((p: any) => {
+      for (const k of Object.keys(p)) p[k].follow = false;
+      p.backlog = { seriesId: 1, title: 'Backlog', follow: true, language: 'dub', tries: {} };
+      p.weekly = { seriesId: 2, title: 'Weekly', follow: true, language: 'dub', tries: {} };
+    });
+    (svc as any).mapEpisodes = async (id: number) => id === 1
+      ? [{ id: 11, s: 1, e: 1, t: 'a', a: '2010-01-01', st: 'missing' }]
+      : [3, 2, 1].map((n) => ({ id: 20 + n, s: 1, e: n, t: 'b', a: n === 3 ? day(2) : n === 2 ? day(9) : '2011-01-01', st: 'missing' }));
+    const order: any[] = [];
+    (svc as any).createJob = async (b: any) => { order.push([b.slug, b.episodeIds]); return { episodes: b.episodeIds.map((id: number) => ({ id })) }; };
+    await svc.nightlyPlan();
+    expect(order).toEqual([['weekly', [23, 22, 21]], ['backlog', [11]]]);   // newest first, though it has more due
+  });
+
+  it('reports how many handed-over episodes Sonarr found, from one to eight weeks back', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { handoffReport } = require('./fill.service');
+    const now = Date.now(), d = (n: number) => new Date(now - n * 86400000).toISOString();
+    const h = { 1: { slug: 'a', title: 'A', at: d(10), found: d(3) }, 2: { slug: 'a', title: 'A', at: d(20) },
+      3: { slug: 'b', title: 'B', at: d(2) }, 4: { slug: 'b', title: 'B', at: d(90), found: d(80) } };
+    expect(handoffReport(h, now)).toEqual({ handed: 2, found: 1 });   // 3 is too new, 4 too old
+    expect(handoffReport({}, now)).toBeUndefined();
+  });
+
+  it('notes in the log when Sonarr has found a handed-over episode', async () => {
+    const svc = new FillService((service as any).config);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    await (svc as any).handoffs().update((h: any) => { h[103] = { slug: 're-zero', title: 'Re: ZERO', at: new Date().toISOString() }; });
+    await svc.setPaused(true);
+    await svc.nightlyPlan();                                          // 2x16 (103) has a file in the fixture
+    expect((await (svc as any).handoffs().read())[103].found).toBeTruthy();
+  });
+
   it('names why an episode failed, in a word', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { failureKind } = require('./fill.service');

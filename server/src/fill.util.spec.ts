@@ -1,5 +1,7 @@
 import {
+  alternatives,
   dubVerdict,
+  indexCatalogue,
   fileEpisode,
   fileMatches,
   matchSeries,
@@ -132,5 +134,19 @@ describe('judgeDisk', () => {
     expect(judgeDisk(767, 20).low).toBe(false);
     expect(judgeDisk(undefined, 20).low).toBe(false);
     expect(judgeDisk(1, 0).low).toBe(false);
+  });
+});
+
+describe('other wcostream pages for a series (23 Nov 2026)', () => {
+  const items = [
+    { name: 'Digimon Fusion', path: 'digimon-fusion', list: 'dubbed' as const },
+    { name: 'Digimon Fusion Season 2', path: 'digimon-fusion-season-2', list: 'dubbed' as const },
+    { name: 'Digimon Xros Wars: Hunters', path: 'digimon-xros-wars-hunters', list: 'subbed' as const },
+    { name: 'Beyblade X English Dubbed', path: 'beyblade-x-english-dubbed-2', list: 'dubbed' as const },
+  ];
+  it('offers same-named and same-start pages, leaving out the ones already linked', () => {
+    const got = alternatives({ title: 'Digimon Fusion', alternateTitles: [{ title: 'Digimon Xros Wars' }] } as any, indexCatalogue(items), items, new Set(['digimon-fusion']));
+    expect(got.map((m) => m.slug)).toEqual(['digimon-fusion-season-2', 'digimon-xros-wars-hunters']);
+    expect(alternatives({ title: 'Beyblade X' } as any, indexCatalogue(items), items, new Set(['beyblade-x-english-dubbed'])).map((m) => m.slug)).toEqual(['beyblade-x-english-dubbed-2']);
   });
 });

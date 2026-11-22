@@ -219,6 +219,31 @@ export function runOnSources(l: WcoListing, map: EpisodeLike[]): Map<number, Sou
   return out;
 }
 
+/**
+ * Why the work a show's page cannot supply is not there (23 Nov 2026). "0 on wcostream" was one tag for four different
+ * things: a page that lists nothing (Beyblade X: a dead link), a page of long videos with no episode numbers (Star Wars:
+ * Clone Wars 2003, five volumes for 25 chapters), seasons the page does not have at all (Kaiji's second season was never
+ * dubbed; Digimon Fusion's third is another page), and episodes after the last one listed. `left` is the work with no
+ * source. `seasons`: Sonarr seasons with work that the page has none of, whatever the verdict (absolute shows: none).
+ */
+export type GapWhy = 'empty' | 'packaged' | 'seasons' | 'stops' | 'different' | 'unlisted';
+export interface GapReason { why: GapWhy; left: number; seasons?: number[]; stops?: string }
+export function gapReason(l: WcoListing, left: (EpisodeLike & { different?: boolean })[], absolute: boolean): GapReason | undefined {
+  if (!left.length) return undefined;
+  const n = left.length;
+  if (!l.count) return { why: 'empty', left: n };
+  if (!l.seasons.size) return { why: 'packaged', left: n };
+  const off = absolute ? [] : [...new Set(left.map((e) => e.s))].filter((s) => !l.seasons.has(s)).sort((a, b) => a - b);
+  const seasons = off.length ? { seasons: off } : {};
+  if (off.length && left.every((e) => off.includes(e.s))) return { why: 'seasons', left: n, ...seasons };
+  if (left.every((e) => e.different)) return { why: 'different', left: n, ...seasons };
+  const top = l.absolute.size ? Math.max(...l.absolute) : 0;
+  const after = absolute ? left.every((e) => e.abs !== undefined && e.abs > top)
+    : !!l.latest && left.every((e) => e.s > l.latest!.s || (e.s === l.latest!.s && e.e > l.latest!.e));
+  if (after) return { why: 'stops', left: n, stops: absolute ? `episode ${top}` : latestText(l), ...seasons };
+  return { why: 'unlisted', left: n, ...seasons };
+}
+
 /** The title in a downloaded file's name ("Show-S01E02-Cabbagezilla Name Game.mp4"), normalised; '' when it has none. */
 export function fileTitle(name: string): string {
   const m = /-S\d+E\d+-(.*)\.[a-z0-9]{2,4}$/i.exec(name);

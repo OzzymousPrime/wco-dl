@@ -215,6 +215,19 @@ export function matchCatalogue(series: SeriesLike, index: Map<string, CatalogueI
   return maybe.length ? { kind: 'maybe', candidates: maybe } : { kind: 'none', candidates: [] };
 }
 
+/**
+ * Other wcostream shows that could carry a series (23 Nov 2026): for a link that lists nothing (relink) or that lacks
+ * seasons (Digimon Fusion's third is "Digimon Xros Wars: Hunters"). Its name matches, then every catalogue entry whose
+ * name holds the first two words of one of its names. Shows already linked are left out.
+ */
+export function alternatives(series: SeriesLike, index: Map<string, CatalogueItem[]>, items: CatalogueItem[], taken: Set<string>, limit = 6): CatalogueMatch[] {
+  const seen = new Set<string>();
+  const names = [series.title, ...(series.alternateTitles ?? []).map((a) => a.title)].filter(Boolean) as string[];
+  const heads = [...new Set(names.map((n) => n.replace(/\(.*?\)/g, ' ').split(/[\s:]+/).filter(Boolean).slice(0, 2).join(' ')))];
+  return [...matchCatalogue(series, index).candidates, ...heads.flatMap((h) => searchCatalogue(items, h, 20))]
+    .filter((m) => !taken.has(m.slug) && !seen.has(m.slug) && seen.add(m.slug)).slice(0, limit);
+}
+
 /** Catalogue entries whose name contains every word of the query; dubbed and cartoon entries first. */
 export function searchCatalogue(items: CatalogueItem[], q: string, limit = 12): CatalogueMatch[] {
   const words = String(q ?? '').toLowerCase().split(/\s+/).map(normaliseTitle).filter(Boolean);

@@ -21,7 +21,8 @@
   const pickable = (e) => actionable(e) || (e.st === 'unknown' && lang() === 'dub');
   const FILL_LABEL = { queued: 'queue', importing: 'import', done: 'done', premium: 'Sonarr', kept: 'check', failed: 'fail', cancelled: '' };
   const ACTIVE = ['queued', 'downloading', 'importing'];
-  const STATE_WORDS = { dub: 'in library, English audio', undub: 'in library, another language only', unknown: 'in library, audio not labelled', missing: 'missing', future: 'not aired yet' };
+  const STATE_WORDS = { dub: 'in library, English audio', undub: 'in library, another language only', unknown: 'in library, audio not labelled', missing: 'missing', future: 'not aired yet',
+    nodub: 'season never dubbed, not counted', elsewhere: 'left to its own season page' };
 
   let show = null, eps = [], fills = new Map(), confirmSwap = false;
   const sel = new Set(), open = new Set();
@@ -352,6 +353,12 @@
           '. Dotted below, left out of "Select the gaps" and the overnight run.');
       }
       if (d.byTitle) parts.push(`${d.byTitle} ${d.byTitle === 1 ? 'is' : 'are'} found by title, because the site numbers this show differently from Sonarr.`);
+      // Why the rest is not there, and for seasons the page has none of, "never dubbed" in one press (23 Nov 2026).
+      const g = UI.gapWords(d.gap);
+      if (g && d.gap.why !== 'unlisted') parts.push(g.why);
+      const noDub = (d.gap?.seasons || []).filter((n) => !(show.notDubbed || []).includes(n));
+      const marks = (noDub.length ? ` <button class="linkbtn" id="nodubmark" type="button">${esc(UI.seasonList(noDub).replace(/^./, (c) => c.toUpperCase()))} was never dubbed</button>` : '') +
+        ((show.notDubbed || []).length ? ` <span>${esc(UI.seasonList(show.notDubbed).replace(/^./, (c) => c.toUpperCase()))} marked never dubbed, not counted.</span> <button class="linkbtn" id="nodubundo" type="button">Count ${show.notDubbed.length === 1 ? 'it' : 'them'} again</button>` : '');
       // The other way of numbering would supply more: offer the switch. Straight through is only offered when the
       // site has no season links, so a number can only mean one episode.
       const f = d.fit || {}, mine = show.absolute ? f.absolute : f.season, other = show.absolute ? f.season : f.absolute;
@@ -360,11 +367,17 @@
       // reading is kept, and until then the map counts it as not on wcostream.
       const read = `wcostream lists ${d.listed} episode${d.listed === 1 ? '' : 's'}${d.latest ? `, up to ${d.latest}` : ''}` +
         (d.readAt ? `; read ${ago(d.readAt)}` : '') + '.';
-      $('wconote').innerHTML = parts.map(esc).join(' ') + (offer ? ` Numbered ${show.absolute ? 'by season' : 'straight through'}, wcostream would supply ${other} of the ${f.work} episodes that need work, not ${mine}. <button class="linkbtn" id="numswitch" type="button">Switch numbering</button>` : '') +
+      $('wconote').innerHTML = parts.map(esc).join(' ') + marks + (offer ? ` Numbered ${show.absolute ? 'by season' : 'straight through'}, wcostream would supply ${other} of the ${f.work} episodes that need work, not ${mine}. <button class="linkbtn" id="numswitch" type="button">Switch numbering</button>` : '') +
         ` <span class="wcoread">${esc(read)} <button class="linkbtn" id="wcoagain" type="button">Check wcostream again</button></span>`;
       $('wconote').hidden = false;
       $('numswitch')?.addEventListener('click', () => $('numbering').querySelector(`[data-v="${!show.absolute}"]`).click());
       $('wcoagain').addEventListener('click', () => { if (show?.series) wcoNote(show.series.id, { fresh: true }); });
+      const setNoDub = async (seasons, said) => {
+        try { await api('POST', '/links/not-dubbed', { slug: show.slug, seasons }); toast(said); await openShow(show.slug, { push: false }); }
+        catch (e) { status(`Could not change it: ${e.message}`, true); }
+      };
+      $('nodubmark')?.addEventListener('click', () => setNoDub([...(show.notDubbed || []), ...noDub], `${UI.seasonList(noDub).replace(/^./, (c) => c.toUpperCase())} no longer counts as missing`));
+      $('nodubundo')?.addEventListener('click', () => setNoDub([], 'Counted as missing again'));
       render();
       if (pick) pickFromLink(pick, d.picked || []);
     } catch { /* the check is optional */ }
@@ -426,7 +439,8 @@
     if (!keepSelection) sel.clear();
     const count = (s) => eps.filter((e) => e.st === s).length;
     $('tally').innerHTML = `<span><b>${count('dub')}</b> in English</span><span><b>${count('undub')}</b> not in English</span>${count('unknown') ? `<span><b>${count('unknown')}</b> audio not labelled</span>` : ''}<span><b>${count('missing')}</b> missing</span>` +
-      (count('future') ? `<span><b>${count('future')}</b> not aired</span>` : '');
+      (count('future') ? `<span><b>${count('future')}</b> not aired</span>` : '') +
+      (count('nodub') ? `<span><b>${count('nodub')}</b> never dubbed</span>` : '') + (count('elsewhere') ? `<span><b>${count('elsewhere')}</b> on a season page</span>` : '');
     const map = $('map'); map.innerHTML = '';
     if (!eps.length) { map.innerHTML = '<p class="empty">Sonarr has no episodes for this show yet.</p>'; render(); return; }
     for (const s of [...new Set(eps.map((e) => e.s))]) {
@@ -1003,9 +1017,10 @@
         (x.switchTo ? `<span class="tag" title="Numbered ${x.switchTo === 'absolute' ? 'straight through' : 'by season'}, wcostream would supply more of this show's missing episodes. Open the show to switch.">check numbering</span>` : '') +
         (x.resting ? `<span class="tag" title="wcostream's video server refuses this show: its missing episodes went to Sonarr, and it is tried again after the rest">videos refused, resting to ${new Date(x.resting).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>` : '') +
         (x.linkWrong ? `<span class="tag gapmark" title="The overnight run leaves it out: ${esc(x.linkWrong)}">wrong link?</span>` : '') +
-        (!x.linkWrong && needs(x) && x.onWco === 0 ? `<span class="tag" title="Last time wcostream was read it listed none of this show's missing episodes. Sonarr gets them as they become due; wcostream is read again every few days.">none on wcostream</span>`
+        (!x.linkWrong && needs(x) && x.onWco === 0 ? (() => { const g = UI.gapWords(x.gap) || UI.gapWords({ why: 'unlisted', left: x.missing || 0 }); return `<span class="tag" title="${esc(g.why)}">${esc(g.tag)}</span>`; })()
           : !x.linkWrong && needs(x) && x.onWco > 0 && x.onWco < (x.missing || 0) + (x.undub || 0) ? `<span class="tag" title="Last time wcostream was read it listed ${x.onWco} of the episodes this show needs">${x.onWco} on wcostream</span>`
           : x.unlisted > 0 ? `<span class="tag" title="Last night's plan found ${x.unlisted} episode${x.unlisted === 1 ? '' : 's'} that wcostream does not list, so they were not queued">${x.unlisted} not on wcostream</span>` : '') +
+        ((x.notDubbed || []).length ? `<span class="tag" title="Not counted as missing and never fetched. Undo it from Library gaps or the show's map.">${esc(UI.seasonList(x.notDubbed))} never dubbed</span>` : '') +
         ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '');
       const lacks = needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>`
         : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;

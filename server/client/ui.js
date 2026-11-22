@@ -6,6 +6,23 @@
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* not remembered */ } } };
   const UI = window.wcoUI = { hooks: {} };
 
+  // Why the rest of a show is not on wcostream (23 Nov 2026), as the server's link check judged it: a short tag and
+  // the sentence behind it. The same words on the home list, the map and the library.
+  const seasonList = (s) => s.length === 1 ? `season ${s[0]}` : `seasons ${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
+  UI.gapWords = (g) => {
+    if (!g) return null;
+    const s = g.seasons || [];
+    switch (g.why) {
+      case 'empty': return { tag: 'link lists nothing', why: 'The wcostream page this show is linked to lists no episodes, so the link is dead or wrong. Relink it from Library gaps.' };
+      case 'packaged': return { tag: 'not episodes on wcostream', why: 'wcostream has this show as long videos without episode numbers, so they cannot be matched to Sonarr’s episodes. Hand it to Sonarr.' };
+      case 'seasons': return { tag: `no ${seasonList(s)} on wcostream`, why: `This wcostream page has no ${seasonList(s)}. If it was never dubbed, mark it so and it stops counting; if it is on another page, link that page as ${seasonList(s)} from Library gaps.` };
+      case 'stops': return { tag: `wcostream stops at ${g.stops}`, why: `wcostream lists up to ${g.stops}; the ${g.left} missing after it are not there (yet). Sonarr gets them as they become due.` };
+      case 'different': return { tag: 'other episodes under these numbers', why: 'wcostream lists these numbers, but its episodes under them are other episodes. Check the numbering on the map.' };
+      default: return { tag: 'none on wcostream', why: `Last time wcostream was read it listed none of these ${g.left} missing episodes${s.length ? `, and has no ${seasonList(s)}` : ''}. Sonarr gets them as they become due; wcostream is read again every few days.` };
+    }
+  };
+  UI.seasonList = seasonList;
+
   // ---------- Icons (15 Nov 2026): one per verb, the same on every page. 16px line icons in the text colour ----------
   // download · copy · check (follow, save) · x (unfollow, dismiss, clear, cancel, close) · pause and play (resume) · retry ·
   // grid (open map) · list (queue) · search · plus (add) · refresh (recount) · moon (theme) · select · next (run next) ·

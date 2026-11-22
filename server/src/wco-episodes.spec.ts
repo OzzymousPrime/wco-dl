@@ -1,4 +1,4 @@
-import { alike, buildListing, linkCheck, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, pickedBy, realTitle, resolveSources } from './wco-episodes.util';
+import { alike, buildListing, gapReason, linkCheck, fileIsEpisode, fileTitle, isListed, latestText, linkTitle, numberingFit, parseEpisodeLinks, pickedBy, realTitle, resolveSources } from './wco-episodes.util';
 
 const page = (items: string) => `<html><body><div>${items}</div></body></html>`;
 const a = (cls: string, href: string, lang?: string) => `<a class="${cls}" href="${href}"${lang ? ` data-lang="${lang}"` : ''}>x</a>`;
@@ -203,5 +203,36 @@ describe("a season link over a page with seasons of its own (22 Nov 2026: Stardu
     expect(src.get(129)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-season-2-episode-5-english-dubbed` });
     expect(src.get(148)).toMatchObject({ kind: 'title', url: `${W}jojo-stardust-crusaders-season-2-episode-24-english-dubbed` });
     expect(src.get(130)).toEqual({ kind: 'none', why: 'unlisted' });          // 2x06 on the site is not listed
+  });
+});
+
+// 23 Nov 2026: 57 followed shows had "0 on wcostream" for four different reasons; each now says which.
+describe('why the rest is not on wcostream', () => {
+  const W = 'https://www.wcostream.tv/';
+  const ep = (s: number, e: number, abs?: number) => ({ id: s * 100 + e, s, e, abs });
+  const flat = (slug: string, n: number) => buildListing(Array.from({ length: n }, (_, i) => `${W}${slug}-episode-${i + 1}-english-dubbed`));
+
+  it('nothing to say when nothing is left', () => {
+    expect(gapReason(flat('kaiji', 26), [], false)).toBeUndefined();
+  });
+  it('a page that lists nothing: the link is dead (Beyblade X)', () => {
+    expect(gapReason(buildListing([]), [ep(1, 27), ep(1, 28)], false)).toEqual({ why: 'empty', left: 2 });
+  });
+  it('long videos with no episode numbers: not fillable here (Clone Wars 2003)', () => {
+    const vols = buildListing([1, 2, 3, 4, 5].map((n) => `${W}star-wars-clone-wars-volume-${n}-english-dubbed`));
+    expect(gapReason(vols, [ep(1, 1), ep(3, 5)], false)).toEqual({ why: 'packaged', left: 2 });
+  });
+  it('seasons the page has none of (Kaiji season 2, Digimon Fusion season 3)', () => {
+    expect(gapReason(flat('kaiji', 26), [ep(2, 1), ep(2, 26)], false)).toEqual({ why: 'seasons', left: 2, seasons: [2] });
+    const mixed = gapReason(flat('kaiji', 26), [ep(1, 27), ep(2, 1)], false);
+    expect(mixed).toMatchObject({ why: 'stops', seasons: [2] });             // a season missing among other gaps is still named
+  });
+  it('episodes after the last one listed', () => {
+    expect(gapReason(flat('beyblade-x', 26), [ep(1, 27), ep(1, 40)], false)).toEqual({ why: 'stops', left: 2, stops: 'episode 26' });
+    expect(gapReason(flat('one-piece', 1100), [ep(21, 5, 1105)], true)).toEqual({ why: 'stops', left: 1, stops: 'episode 1100' });
+  });
+  it('listed under the number but another episode', () => {
+    expect(gapReason(flat('x', 5), [{ ...ep(1, 2), different: true }], false)).toEqual({ why: 'different', left: 1 });
+    expect(gapReason(flat('x', 5), [ep(1, 2)], false)).toEqual({ why: 'unlisted', left: 1 });
   });
 });

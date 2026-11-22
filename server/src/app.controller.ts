@@ -189,6 +189,20 @@ export class AppController {
     return this.fillService.setNoSwap(body);
   }
 
+  /** "Season N was never dubbed" (23 Nov 2026): { slug, seasons: [2] }; seasons: [] counts them again. */
+  @Post('links/not-dubbed')
+  @UseGuards(JsonRequestGuard)
+  notDubbed(@Body() body: any) {
+    return this.fillService.setNotDubbed(body);
+  }
+
+  /** "Sonarr season N is on this other wcostream page" (23 Nov 2026): { slug, page, season }. */
+  @Post('links/season-page')
+  @UseGuards(JsonRequestGuard)
+  seasonPage(@Body() body: any) {
+    return this.fillService.linkSeasonPage(body);
+  }
+
   /** "This wcostream show is Sonarr season N" (21 Nov 2026): { slug, season } or { slug, season: null }. */
   @Post('links/season')
   @UseGuards(JsonRequestGuard)

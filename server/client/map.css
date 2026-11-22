@@ -46,6 +46,8 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .cell.missing{background:transparent;border:1px dashed var(--line-strong);cursor:pointer}
 .cell.missing .n{color:var(--text)}
 .cell.future{background:transparent;border-style:dotted;opacity:.55}
+/* 23 Nov 2026: a season never dubbed, or left to its own season page: not work, so quieter than a gap */
+.cell.nodub,.cell.elsewhere{background:transparent;border-style:dotted;opacity:.55}   /* as "not aired": .45 took the number under 3:1 */
 .cell.undub:hover,.cell.missing:hover{border-color:var(--text-2)}
 .cell[aria-checked=true]{background:var(--accent-soft);border:2px solid var(--accent)}
 .cell[aria-checked=true] .n{color:var(--text)}
@@ -211,6 +213,8 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;bor
 .lib .match select,.lib .match input{height:32px;max-width:100%;min-width:0;padding:0 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface)}
 .lib .match input{width:220px}
 .lib .acts{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+/* 23 Nov 2026: the reason on a "Can't fill" row reads as a sentence above its fix buttons */
+.lib .match .fixwhy{flex-basis:100%;line-height:1.45}
 .lib .btn{height:32px}
 .lib .found{flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap}
 .tag.ok{color:var(--accent);border-color:var(--accent)}

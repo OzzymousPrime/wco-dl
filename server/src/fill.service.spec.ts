@@ -561,6 +561,60 @@ describe('FillService worker', () => {
     expect(await svc.setSeason({ slug: 're-zero-part-two', season: null })).toMatchObject({ season: null, absolute: false });
   });
 
+  // 23 Nov 2026: Kaiji's second season was never dubbed, so its 26 episodes counted as missing for ever.
+  it('a season marked never dubbed stops counting and is never planned', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const wco = { peek: () => undefined, listing: jest.fn().mockResolvedValue(buildListing(['https://www.wcostream.tv/re-zero-episode-1-english-dubbed'])) };
+    const svc = new FillService((service as any).config, wco as any);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    await svc.linkIsRight({ slug: 're-zero' });
+    await expect(svc.setNotDubbed({ slug: 're-zero', seasons: [0] })).rejects.toThrow(/whole numbers/);
+    expect(await svc.setNotDubbed({ slug: 're-zero', seasons: [2, 2] })).toEqual({ slug: 're-zero', notDubbed: [2] });
+    await svc.setPaused(true);
+    expect((await svc.nightlyPlan()).filter((j) => j.slug === 're-zero')).toEqual([]);
+    const row = (await svc.followed()).find((f) => f.slug === 're-zero')!;
+    expect(row).toMatchObject({ missing: 0, undub: 0, notDubbed: [2] });     // 2x14 missing and 2x15 Japanese: neither counts
+    expect((await (svc as any).mapEpisodes(575)).map((e: any) => e.st)).toEqual(['nodub', 'nodub', 'dub']);
+    await svc.setNotDubbed({ slug: 're-zero', seasons: [] });
+    expect((await svc.followed()).find((f) => f.slug === 're-zero')).toMatchObject({ missing: 1, notDubbed: [] });
+  });
+
+  // 23 Nov 2026: Digimon Fusion's third season is another page on wcostream.
+  it('a season on another page is planned from that page and left out of the whole-series link', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildListing } = require('./wco-episodes.util');
+    const lists: Record<string, string[]> = {
+      're-zero': ['https://www.wcostream.tv/re-zero-episode-1-english-dubbed'],
+      're-zero-part-two': [14, 15].map((n) => `https://www.wcostream.tv/re-zero-part-two-episode-${n}-english-dubbed`),
+    };
+    const wco = { peek: () => undefined, listing: jest.fn(async (slug: string) => buildListing(lists[slug])) };
+    const svc = new FillService((service as any).config, wco as any);
+    await svc.setFollow({ slug: 're-zero', seriesId: 575, follow: true, language: 'dub' });
+    await svc.linkIsRight({ slug: 're-zero' });
+    await expect(svc.linkSeasonPage({ slug: 're-zero', page: 're-zero', season: 2 })).rejects.toThrow(/own page/);
+    expect(await svc.linkSeasonPage({ slug: 're-zero', page: 're-zero-part-two', season: 2 })).toEqual({ slug: 're-zero', page: 're-zero-part-two', season: 2 });
+    await svc.linkIsRight({ slug: 're-zero-part-two' });
+    const rows = await svc.followed();
+    expect(rows.find((f) => f.slug === 're-zero')).toMatchObject({ missing: 0, undub: 0 });
+    expect(rows.find((f) => f.slug === 're-zero-part-two')).toMatchObject({ missing: 1, season: 2, language: 'dub' });
+    await svc.setPaused(true);
+    const made = await svc.nightlyPlan();
+    expect(made.filter((j) => j.slug === 're-zero')).toEqual([]);
+    expect(made.find((j) => j.slug === 're-zero-part-two')!.episodes.map((e) => e.id)).toEqual([101, 102]);
+  });
+
+  it('a relink unfollows the old link of the same series and keeps its season rules', async () => {
+    const svc = new FillService((service as any).config);
+    (svc as any).allSeries = async () => [{ id: 575, title: 'Re: ZERO' }];
+    await svc.setFollow({ slug: 'dead-page', seriesId: 575, follow: true, language: 'dub' });
+    await svc.setNotDubbed({ slug: 'dead-page', seasons: [3] });
+    expect(await svc.setLinks({ items: [{ slug: 'live-page', seriesId: 575, follow: true, language: 'dub', replaces: 'dead-page' }] })).toMatchObject({ linked: 1 });
+    const prefs = JSON.parse(await fs.readFile(path.join(dir, 'config', 'show-prefs.json'), 'utf8'));
+    expect(prefs['dead-page'].follow).toBe(false);
+    expect(prefs['live-page']).toMatchObject({ follow: true, notDubbed: [3] });
+  });
+
   it('starts the held queue as soon as any read works again', async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { WcoHealth } = require('./wco-health');
@@ -582,7 +636,7 @@ describe('FillService worker', () => {
     const svc = new FillService((service as any).config);
     (svc as any).splitFolders = async () => new Map([[575, ['E:/TV/Re Zero (old)']]]);
     const sent: any[] = [];
-    (svc as any).mapEpisodes = async () => [                           // 2x14 has a file once the import was sent
+    (svc as any).mapAllEpisodes = async () => [                           // 2x14 has a file once the import was sent
       { id: 101, s: 2, e: 14, t: 'Straight Bet', st: sent.length ? 'dub' : 'missing' }, { id: 102, s: 2, e: 15, t: 'Otto Suwen', st: 'undub' },
       { id: 103, s: 2, e: 16, t: 'Bonds of Lust', st: sent.length ? 'dub' : 'missing' }];
     (svc as any).sonarr = jest.fn(async (method: string, url: string, data?: any) => {
@@ -616,7 +670,7 @@ describe('FillService worker', () => {
 
   it('clears from Needs you what is not on wcostream and already with Sonarr, or three days old; keeps the rest', async () => {
     const svc = new FillService((service as any).config);
-    (svc as any).mapEpisodes = async () => [];
+    (svc as any).mapAllEpisodes = async () => [];
     await (svc as any).changePrefs((p: any) => { p.nyshow = { seriesId: 575, tries: { 1: { n: 1, last: '', handedToSonarr: true } } }; });
     const old = new Date(Date.now() - 4 * 86400000).toISOString(), recent = new Date().toISOString();
     const unlisted = 'Not downloaded: wcostream does not list this episode under this season and number';
@@ -1132,5 +1186,33 @@ describe('FillService: Sonarr series list for screens', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
+  });
+});
+
+describe('season rules on an episode map (23 Nov 2026)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { markSeasons, seasonRules } = require('./fill.service');
+  const map = [{ s: 1, st: 'dub' }, { s: 1, st: 'missing' }, { s: 2, st: 'missing' }, { s: 2, st: 'undub' }, { s: 3, st: 'missing' }, { s: 3, st: 'dub' }];
+  it('reads never-dubbed seasons from any link and covered seasons from followed season links only', () => {
+    const r = seasonRules({ a: { seriesId: 1, notDubbed: [2] }, b: { seriesId: 1, follow: true, season: 3 }, c: { seriesId: 1, season: 4 }, d: { seriesId: 2, notDubbed: [1] } }, 1);
+    expect([...r.notDubbed]).toEqual([2]);
+    expect([...r.elsewhere]).toEqual([3]);
+  });
+  it('marks what needs work: never dubbed, or left to another page; files in English stay', () => {
+    const rules = { notDubbed: new Set([2]), elsewhere: new Set([3]) };
+    expect(markSeasons(map, rules).map((e: any) => e.st)).toEqual(['dub', 'missing', 'nodub', 'nodub', 'elsewhere', 'dub']);
+    expect(markSeasons(map.filter((e) => e.s === 3), rules, 3).map((e: any) => e.st)).toEqual(['missing', 'dub']);   // the season link itself
+  });
+});
+
+describe('a listen to an unlabelled file (23 Nov 2026)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { heardVerdict } = require('./fill.service');
+  it('trusts English readily, another language only when sure, and never a different file', () => {
+    expect(heardVerdict({ size: 10, lang: 'en', p: 0.7 }, 10)).toBe('dub');
+    expect(heardVerdict({ size: 10, lang: 'ja', p: 0.9 }, 10)).toBe('undub');
+    expect(heardVerdict({ size: 10, lang: 'ja', p: 0.6 }, 10)).toBeUndefined();
+    expect(heardVerdict({ size: 10, lang: 'en', p: 0.99 }, 11)).toBeUndefined();     // replaced since the listen
+    expect(heardVerdict(undefined, 10)).toBeUndefined();
   });
 });

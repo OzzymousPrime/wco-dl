@@ -1234,3 +1234,13 @@ describe('a page that carries part of a series', () => {
     expect(markPart(map, undefined, true).filter((e: any) => e.st === 'missing')).toEqual([]);
   });
 });
+
+describe('a premium-only show goes to Sonarr a batch a night (26 Nov 2026)', () => {
+  const { nextPremiumBatch } = require('./fill.service');
+  it('takes the newest missing episodes not handed over yet', () => {
+    const map = [{ id: 1, st: 'missing', a: '2020-01-01' }, { id: 2, st: 'dub', a: '2021-01-01' }, { id: 3, st: 'missing', a: '2024-01-01' },
+      { id: 4, st: 'missing', a: '2023-01-01' }, { id: 5, st: 'undub', a: '2025-01-01' }];
+    expect(nextPremiumBatch(map, { 3: { handedToSonarr: true } }, 2).map((e: any) => e.id)).toEqual([4, 1]);
+    expect(nextPremiumBatch(map, {}, 2).map((e: any) => e.id)).toEqual([3, 4]);
+  });
+});

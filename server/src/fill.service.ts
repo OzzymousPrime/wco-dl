@@ -149,6 +149,11 @@ export function markPart<T extends { id: number; st: EpisodeStatus }>(map: T[], 
  * listed episodes could never be had): this many of its episodes refused that way with none downloaded since.
  */
 export const PREMIUM_SHOW_EPISODES = 3;
+/** A premium-only show's missing episodes go to Sonarr this many a night, newest first: each is searched for, not just monitored. */
+export const PREMIUM_HAND_PER_NIGHT = 30;
+export function nextPremiumBatch<T extends { id: number; st: string; a?: string }>(map: T[], tries: Record<string, { handedToSonarr?: boolean }>, n = PREMIUM_HAND_PER_NIGHT): T[] {
+  return map.filter((e) => e.st === 'missing' && !tries[e.id]?.handedToSonarr).sort((x, y) => (y.a ?? '').localeCompare(x.a ?? '') || y.id - x.id).slice(0, n);
+}
 
 /** Which handed-over episodes are searched for tonight: the newest `cap` by air date; the rest are only monitored. */
 export function newestIds(groups: { id: number; a?: string }[][], cap: number): Set<number> {
@@ -1811,14 +1816,19 @@ export class FillService implements OnApplicationBootstrap {
         if (pref.noSwap) pref.counts.undub = 0;
         const tries = (pref.tries ??= {});
         // Resting after its videos were found dead: left alone until the rest is over, then tried again once.
-        if (pref.deadUntil && pref.deadUntil > new Date().toISOString()) continue;
+        if (pref.deadUntil && pref.deadUntil > new Date().toISOString()) {
+          // A premium-only show's backlog goes to Sonarr a batch a night while it rests.
+          const more = pref.restWhy === 'premium' ? nextPremiumBatch(map, tries) : [];
+          if (more.length) handOff.push({ slug, pref, eps: more, why: 'premium-only on wcostream' });
+          continue;
+        }
         if (pref.deadUntil) { delete pref.deadUntil; delete pref.restWhy; }
         // wcostream keeps the show for its paying members: Sonarr looks for it, and it is asked again after the rest.
         // Only while other shows still download, so a wall across the whole site hands nothing over.
         const fresh = (await this.prefs())[slug]?.premium;
         if ((fresh?.n ?? 0) >= PREMIUM_SHOW_EPISODES && this.jobs.some((j) => j.slug !== slug && j.episodes.some((e) => e.state === 'done') && j.createdAt > new Date(Date.now() - 3 * 86400000).toISOString())) {
-          const eps = map.filter((e) => e.st === 'missing' && !tries[e.id]?.handedToSonarr);
-          if (eps.length) handOff.push({ slug, pref, eps, why: `wcostream keeps this show for its paying members (${fresh!.n} episodes refused as premium-only); rested ${DEAD_SHOW_REST_DAYS} days` });
+          const eps = nextPremiumBatch(map, tries);
+          if (eps.length) handOff.push({ slug, pref, eps, why: `wcostream keeps this show for its paying members (${fresh!.n} episodes refused as premium-only); rested ${DEAD_SHOW_REST_DAYS} days, its missing episodes go to Sonarr ${PREMIUM_HAND_PER_NIGHT} a night` });
           pref.deadUntil = new Date(Date.now() + DEAD_SHOW_REST_DAYS * 86400000).toISOString();
           pref.restWhy = 'premium';
           pref.premium = { n: 0, at: fresh!.at };

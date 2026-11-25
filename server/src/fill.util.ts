@@ -78,7 +78,9 @@ export function normaliseTitle(s: string): string {
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/&/g, 'and')
-    .replace(/\((19|20)\d\d\)|\b(19|20)\d\d\b/g, ' ')
+    // A release year goes ("Ducktales (2017)"), a number that is part of the name stays: "Mao 2099" lost its 2099 and
+    // became "mao", so the wcostream show MAO was linked to Demon Lord 2099 (25 Nov 2026).
+    .replace(/\((19|20)\d\d\)|\b(19|20)\d\d\b/g, (y) => (Number(y.replace(/\D/g, '')) <= new Date().getFullYear() + 2 ? ' ' : y))
     .replace(/[^a-z0-9]+/g, '');
 }
 
@@ -89,6 +91,18 @@ export interface SeriesLike {
   titleSlug?: string;
   path?: string;
   alternateTitles?: { title: string }[];
+}
+
+/** Is one of the series' names exactly the slug's? Only such a match is linked by a look-up by itself (25 Nov 2026). */
+export function namedAs(slug: string, s: SeriesLike): boolean {
+  return exactOnly(slug, s);
+}
+function exactOnly(slug: string, s: SeriesLike): boolean {
+  let name = slug;
+  try { name = decodeURIComponent(slug); } catch { /* keep it as written */ }
+  const want = normaliseTitle(name.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
+  return !!want && [s.title, s.titleSlug ?? '', ...(s.alternateTitles ?? []).map((a) => a.title)]
+    .flatMap((t) => [t, t.replace(/&/g, ' ')]).map(normaliseTitle).includes(want);
 }
 
 /** Sonarr series whose title, slug or alternate title matches the wco slug. Exact matches first. */

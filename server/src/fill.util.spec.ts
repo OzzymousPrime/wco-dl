@@ -1,5 +1,6 @@
 import {
   alternatives,
+  namedAs,
   dubVerdict,
   indexCatalogue,
   fileEpisode,
@@ -148,5 +149,23 @@ describe('other wcostream pages for a series (23 Nov 2026)', () => {
     const got = alternatives({ title: 'Digimon Fusion', alternateTitles: [{ title: 'Digimon Xros Wars' }] } as any, indexCatalogue(items), items, new Set(['digimon-fusion']));
     expect(got.map((m) => m.slug)).toEqual(['digimon-fusion-season-2', 'digimon-xros-wars-hunters']);
     expect(alternatives({ title: 'Beyblade X' } as any, indexCatalogue(items), items, new Set(['beyblade-x-english-dubbed'])).map((m) => m.slug)).toEqual(['beyblade-x-english-dubbed-2']);
+  });
+});
+
+// 25 Nov 2026: "Mao 2099" (Demon Lord 2099) lost its 2099 as a "year", so the wcostream show "mao" linked to it.
+describe('names with numbers, and linking by itself', () => {
+  it('drops a release year but keeps a number that is part of the name', () => {
+    expect(normaliseTitle('DuckTales (2017)')).toBe('ducktales');
+    expect(normaliseTitle('Mao 2099')).toBe('mao2099');
+    expect(normaliseTitle('Blade Runner 2049')).toBe('bladerunner2049');
+  });
+  it('links by itself only on an exact name; a partial match is only offered', () => {
+    const demon = { id: 5091, title: 'Demon Lord 2099', alternateTitles: [{ title: 'Mao 2099' }] };
+    expect(matchSeries('mao', [demon])).toEqual([demon]);                    // offered as a start of its name...
+    expect(namedAs('mao', demon)).toBe(false);                                // ...but not taken
+    expect(namedAs('mao-2099', demon)).toBe(true);
+    const pups = { id: 1, title: 'Paw Patrol: The Mighty Pups' };
+    expect(matchSeries('paw-patrol', [pups])).toEqual([pups]);              // offered
+    expect(namedAs('paw-patrol', pups)).toBe(false);                        // not taken
   });
 });

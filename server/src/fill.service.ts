@@ -26,7 +26,7 @@ import {
   matchSeries,
   parsePremium,
   parseProgress,
-  parseShowLink, CatalogueItem, CatalogueMatch, indexCatalogue, matchCatalogue, alternatives, audioStatus, catalogueKey, normaliseTitle,
+  parseShowLink, CatalogueItem, CatalogueMatch, indexCatalogue, matchCatalogue, alternatives, namedAs, audioStatus, catalogueKey, normaliseTitle,
   playVerdict, Probe,
 } from './fill.util';
 import { diskState, DiskState, lowDiskMessage } from './disk-space';
@@ -856,7 +856,8 @@ export class FillService implements OnApplicationBootstrap {
     // Added in Sonarr since the list was fetched: ask again rather than say it is not there.
     if (seriesId && !all.some((s) => s.id === seriesId)) all = await this.fetchSeries();
     const candidates = matchSeries(parsed.slug, all);
-    if (!seriesId && candidates.length === 1) seriesId = candidates[0].id;
+    // Linked by itself only on an exact name; a partial one is offered, not taken (25 Nov 2026: "mao" took Demon Lord 2099).
+    if (!seriesId && candidates.length === 1 && namedAs(parsed.slug, candidates[0])) seriesId = candidates[0].id;
     const brief = (s: any) => ({ id: s.id, title: s.title, year: s.year, path: s.path });
     if (!seriesId) {
       return { slug: parsed.slug, language: parsed.language, series: null, candidates: candidates.map(brief), episodes: [], ...(pick ? { pick } : {}) };
@@ -978,7 +979,9 @@ export class FillService implements OnApplicationBootstrap {
     const series = await this.sonarr('get', `series/${seriesId}`);
     // An automatic run never touches a file whose audio is not labelled; a person may pick one on the map.
     const swappable = (st: EpisodeStatus) => st === 'undub' || (st === 'unknown' && !body.auto);
-    const needed = map.filter((e) => ids.includes(e.id) && (e.st === 'missing' || (swappable(e.st) && language !== 'sub')));
+    // 'future': Sonarr's air date is still ahead but wcostream has the episode already (25 Nov 2026, Overgeared 1x09
+    // dubbed two days before Sonarr's date). The map offers it, and the plan queues it, only when wcostream lists it.
+    const needed = map.filter((e) => ids.includes(e.id) && (e.st === 'missing' || e.st === 'future' || (swappable(e.st) && language !== 'sub')));
     if (!needed.length) throw new BadRequestException('None of those episodes needs work');
     const busy = this.activeIds();
     const picked = needed.filter((e) => !busy.has(e.id));
@@ -988,7 +991,7 @@ export class FillService implements OnApplicationBootstrap {
       ...(season ? { season } : {}),
       createdAt: new Date().toISOString(),
       episodes: picked.map((e) => ({ id: e.id, s: e.s, e: e.e, abs: e.abs, title: e.t,
-        mode: e.st === 'missing' ? 'missing' : 'swap', state: 'queued' })),
+        mode: e.st === 'missing' || e.st === 'future' ? 'missing' : 'swap', state: 'queued' })),
     };
     this.jobs.push(job);
     if (this.jobs.length > MAX_JOBS) this.jobs.splice(0, this.jobs.length - MAX_JOBS);
@@ -1742,6 +1745,17 @@ export class FillService implements OnApplicationBootstrap {
         }
         if (gaveUp.length) handOff.push({ slug, pref, eps: gaveUp, why: `tried ${RETRY_DAYS.length} times` });
         if (dead.length) handOff.push({ slug, pref, eps: dead, why: 'its video could not be had on two nights' });
+        // Episodes Sonarr dates up to a fortnight ahead that wcostream has already (an early dub): queued as well.
+        const soon = new Date(Date.now() + EARLY_DAYS * 86400000).toISOString().slice(0, 10);
+        const early = map.filter((e) => e.st === 'future' && e.a && e.a <= soon && !busy.has(e.id) && (tries[e.id]?.n ?? 0) < RETRY_DAYS.length &&
+          (!tries[e.id] || retryDue('', tries[e.id]) === 'due'));
+        if (early.length && this.wco && Date.now() < deadline) {
+          const listing = await this.wco.listing(slug, pref.language ?? 'dub').catch(() => undefined);
+          if (listing && this.wcoVerdict().ok) {
+            const src = sourcesFor(listing, map, !!pref.absolute, pref.season);
+            due.push(...early.filter((e) => src.get(e.id) && src.get(e.id)!.kind !== 'none').map((e) => e.id));
+          }
+        }
         if (!due.length) { delete pref.unlisted; if (last?.onWco !== undefined) Object.assign(pref.counts, { onWco: last.onWco, wcoAt: last.wcoAt }, last.gap && pref.counts.missing ? { gap: last.gap } : {}); continue; }
         // None of this show's gaps was on wcostream at the last read: read again after a few days, or when one airs.
         const quiet = last?.onWco === 0 && last.wcoAt && Date.now() - new Date(last.wcoAt).getTime() < NONE_ON_WCO_DAYS * 86400000 &&
@@ -1925,13 +1939,15 @@ export class FillService implements OnApplicationBootstrap {
     const picked = pickLink ? pickedBy(pickLink, map, sources, absolute) : undefined;
     const work = map.filter((e) => e.st === 'missing' || e.st === 'undub' || e.st === 'unknown');
     const gone = work.filter((e) => sources.get(e.id)?.kind === 'none');
+    // Not aired by Sonarr's date, but wcostream lists it (an early dub): the map lets it be picked.
+    const early = map.filter((e) => e.st === 'future' && sources.get(e.id) && sources.get(e.id)!.kind !== 'none').map((e) => e.id);
     // Episodes the site has inside a link that holds several: the map says which go together.
     const together: Record<number, number[]> = {};
     for (const e of map) { const s = sources.get(e.id); if (s?.kind === 'title' && s.ids.length > 1) together[e.id] = s.ids; }
     const other = { ...numberingFit(listing, map, new Set(work.filter((e) => e.st !== 'unknown').map((e) => e.id)), absolute) };
     return { checked: true, unlisted: gone.map((e) => e.id), different: gone.filter((e) => (sources.get(e.id) as any).why === 'different').length,
       byTitle: work.filter((e) => sources.get(e.id)?.kind === 'title').length, together, fit: other,
-      latest: latestText(listing), language, listed: listing.count, readAt: this.wco.readAt(parsed.slug, language), ...(picked ? { picked } : {}),
+      latest: latestText(listing), language, listed: listing.count, early, readAt: this.wco.readAt(parsed.slug, language), ...(picked ? { picked } : {}),
       gap: gapReason(listing, gone.filter((e) => e.st === 'missing').map((e) => ({ ...e, different: (sources.get(e.id) as any)?.why === 'different' })), absolute) ?? null };
   }
 
@@ -2229,6 +2245,9 @@ export function heardVerdict(h: { size: number; lang: string; p: number } | unde
 function countMap(map: { st: string }[]) {
   return { missing: map.filter((e) => e.st === 'missing').length, undub: map.filter((e) => e.st === 'undub').length, at: new Date().toISOString() };
 }
+
+/** How far ahead of Sonarr's air date an episode wcostream already lists is queued by the overnight run. */
+export const EARLY_DAYS = 14;
 
 /** The video host answered with an error page instead of the video (a dead or overloaded host for that show). */
 export const VIDEO_REFUSED = /returned HTTP (4\d\d|5\d\d)|instead of a video/i;

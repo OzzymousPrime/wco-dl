@@ -11,7 +11,8 @@
   const audioName = (a) => (!a ? 'unknown' : a.split('/').map((x) => ({ eng: 'English', jpn: 'Japanese' }[x] || x)).join(' and '));
   const lang = () => $('lang').querySelector('[aria-pressed=true]').dataset.v;
   // In Sub mode a Japanese-audio file is what you want, so only missing episodes need work.
-  const wanted = (e) => e.st === 'missing' || (e.st === 'undub' && lang() === 'dub');
+  // An episode Sonarr dates ahead that wcostream lists already (an early dub, 25 Nov 2026) can be fetched too.
+  const wanted = (e) => e.st === 'missing' || (e.st === 'undub' && lang() === 'dub') || (e.st === 'future' && wcoEarly.has(e.id));
   const actionable = (e) => !e.nowco && wanted(e);
   // Needs work, but wcostream cannot supply it: a state of its own, said on the square ("n/a"), in its label and in its tooltip.
   const offWco = (e) => !!e.nowco && wanted(e);
@@ -326,13 +327,13 @@
   // They are dotted, left out of "select all" and not queued overnight: a download of them fails.
   // After a run for this show finishes the answer is asked for again (wcoStale): what needed work has changed. The old
   // note and dots stay up until the new answer is in, so nothing blinks.
-  let wcoFor = '', wcoGone = new Set(), wcoTogether = {}, wcoStale = false, wcoPending = null;
+  let wcoFor = '', wcoGone = new Set(), wcoEarly = new Set(), wcoTogether = {}, wcoStale = false, wcoPending = null;
   // o.fresh: read the show page again now rather than use the copy kept for six hours ("Check wcostream again").
   async function wcoNote(id, o = {}) {
     const key = `${id}|${show.slug}|${lang()}|${show.absolute}`;
     const pick = pickNext;
     if (wcoFor === key && !wcoStale && !pick && !o.fresh) return;
-    if (wcoFor !== key) { wcoGone = new Set(); wcoTogether = {}; $('wconote').hidden = true; }
+    if (wcoFor !== key) { wcoGone = new Set(); wcoEarly = new Set(); wcoTogether = {}; $('wconote').hidden = true; }
     wcoFor = key; wcoStale = false; pickNext = null;
     const fresh = !!(o.fresh || pick);
     if (fresh) status(pick ? `Reading wcostream again for episode ${pick.number}. This can take a minute.` : 'Reading wcostream again. This can take a minute.');
@@ -342,7 +343,7 @@
       if (wcoFor !== key) return;
       if (!d.checked) { if (fresh) status('wcostream could not be read just now. Try "Check wcostream again" in a minute.', true); return; }
       if (fresh) status('');
-      wcoGone = new Set(d.unlisted); wcoTogether = d.together || {};
+      wcoGone = new Set(d.unlisted); wcoEarly = new Set(d.early || []); wcoTogether = d.together || {};
       eps.forEach((e) => { e.nowco = wcoGone.has(e.id); if (e.el) e.el.classList.toggle('nowco', e.nowco); });
       const n = d.unlisted.length, version = lang() === 'dub' ? 'English dub' : 'subbed';
       const parts = [];
@@ -542,7 +543,7 @@
 
   function render() {
     for (const e of eps) { if (!selectable(e)) sel.delete(e.i); cellLook(e); }
-    const p = picked(), sw = p.filter(isSwap).length, mi = p.filter((e) => e.st === 'missing').length;
+    const p = picked(), sw = p.filter(isSwap).length, mi = p.filter((e) => e.st === 'missing' || e.st === 'future').length;
     $('bar').classList.toggle('on', p.length > 0);
     // The button says the result ("Download 5 episodes"); the line beside it says what happens to them afterwards.
     $('sum').innerHTML = `<b>${p.length} selected</b> <span>· ${[sw && sw + ' swap to dub', sw && mi && mi + ' to download', 'imported into Sonarr when done'].filter(Boolean).join(' · ')}</span>` +

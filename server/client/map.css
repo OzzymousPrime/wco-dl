@@ -415,6 +415,15 @@ main:has(#show:not([hidden])) #pagetitle{display:none}
 .fhead{align-items:center}
 .fhead .btn{height:28px;padding:0 8px;font-size:12px;gap:6px}
 .flist .btn{height:32px;padding:0 8px;font-size:13px;gap:6px}
+/* 26 Nov 2026: fill first, picking several shows, Library sorting */
+.flist .btn[data-first][aria-pressed=true]{color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.fpick{width:18px;height:18px;flex:none;accent-color:var(--accent);margin:0}
+.fbulk{position:sticky;top:8px;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;margin:8px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 4px 14px rgba(0,0,0,.08)}
+.fbulk b{margin-right:4px;font-weight:600}
+.fbulk .btn{height:32px;padding:0 10px;font-size:13px}
+.sortby{display:inline-flex;gap:8px;align-items:center;color:var(--text-2);font-size:13px}
+.sortby select{height:32px;padding:0 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+@media (pointer:coarse){.fpick{width:24px;height:24px}.sortby select{min-height:44px}}
 @media (pointer:coarse){.fhead .btn,.flist .btn{height:auto}}
 
 /* "Needs you" by show (15 Nov 2026): a row per show, its episodes behind a disclosure */

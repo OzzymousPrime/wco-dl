@@ -7,10 +7,20 @@
   // The screen opens on the rows that need a decision from you (several wcostream shows could be the one: pick it),
   // when there are any; "All" and the other states are one press away.
   // "Can't fill" (23 Nov 2026): linked shows with gaps that wcostream cannot supply, by reason, each with its fix.
-  const KINDS = [['maybe', 'Needs a decision'], ['stuck', 'Can’t fill'], ['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['none', 'No match'], ['new', 'New on wcostream']];
+  const KINDS = [['maybe', 'Needs a decision'], ['stuck', 'Can’t fill'], ['seasonpages', 'Season pages'], ['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['none', 'No match'], ['new', 'New on wcostream']];
   const kindOf = (r) => (r.state === 'exact' ? 'ready' : r.state);
   const stuck = (r) => !!r.slug && r.gaps > 0 && (!!r.linkWrong || !!r.resting || (r.onWco === 0 && !!r.gap));
-  const inKind = (r, k) => k === 'all' || (k === 'stuck' ? stuck(r) : kindOf(r) === k);
+  const inKind = (r, k) => k === 'all' || (k === 'stuck' ? stuck(r) : k === 'seasonpages' ? (r.seasonPages || []).length > 0 : kindOf(r) === k);
+  // Sorting (26 Nov 2026): remembered in this browser; "by folder" keeps the drive groups, the others list one run.
+  let sort = 'folder';
+  try { sort = localStorage.getItem('wco-lib-sort') || 'folder'; } catch { /* the default stays */ }
+  const SORTS = {
+    name: (a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }),
+    missing: (a, b) => (b.gaps + b.undub) - (a.gaps + a.undub) || SORTS.name(a, b),
+    onwco: (a, b) => (b.onWco ?? -1) - (a.onWco ?? -1) || (b.candidates || []).length - (a.candidates || []).length || SORTS.missing(a, b),
+    newest: (a, b) => String(b.latest || '').localeCompare(String(a.latest || '')) || SORTS.name(a, b),
+  };
+  const sorted = (list) => (sort === 'folder' ? list : [...list].sort(SORTS[sort]));
   // The order the reasons are listed in: the ones a press fixes first.
   const REASONS = [['wrong', 'Linked to another show'], ['empty', 'Link lists nothing'], ['seasons', 'Seasons not on the page'], ['packaged', 'Not episodes on wcostream'],
     ['different', 'Other episodes under these numbers'], ['stops', 'wcostream stops early'], ['premium', 'Premium only on wcostream'], ['resting', 'Videos refused, resting'], ['unlisted', 'Not listed']];
@@ -53,9 +63,19 @@
     if (kind === 'new') { $('rows').innerHTML = freshList(); return; }
     if (kind === 'stuck') {
       $('rows').innerHTML = list.length ? REASONS.map(([key, label]) => {
-        const g = list.filter((r) => reasonOf(r) === key);
+        const g = sorted(list.filter((r) => reasonOf(r) === key));
         return g.length ? `<h2 class="group">${esc(label)}<span class="hint">${g.length} series · ${sum(g, 'gaps').toLocaleString('en-GB')} episode${sum(g, 'gaps') === 1 ? '' : 's'} missing</span></h2><ul class="lib">${g.map(row).join('')}</ul>` : '';
       }).join('') : '<p class="empty">Every linked show with gaps has some of them on wcostream.</p>';
+      return;
+    }
+    if (kind === 'seasonpages') {
+      $('rows').innerHTML = list.length ? `<h2 class="group">Season pages on wcostream<span class="hint">${list.length} series with a wcostream page named as one of their seasons, not linked yet</span></h2><ul class="lib">${sorted(list).map(row).join('')}</ul>`
+        : '<p class="empty">No unlinked wcostream page is named as a season of a series here.</p>';
+      return;
+    }
+    if (sort !== 'folder') {
+      $('rows').innerHTML = list.length ? `<h2 class="group">${esc($('sort').selectedOptions[0].textContent.replace(/^./, (c) => c.toUpperCase()))}<span class="hint">${list.length} series · ${sum(list, 'gaps').toLocaleString('en-GB')} episodes missing</span></h2><ul class="lib">${sorted(list).map(row).join('')}</ul>`
+        : '<p class="empty">Nothing here matches.</p>';
       return;
     }
     $('rows').innerHTML = list.length ? [...new Set(list.map((r) => r.root))].map((root) => {
@@ -132,6 +152,7 @@
         `<option value="${i}">${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</option>`).join('')}</select>${find}`;
       acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>`;
     } else { match = `<span>No wcostream show by this name</span>${find}`; acts = ''; }
+    if ((r.seasonPages || []).length) match += r.seasonPages.map((p) => `<button class="btn" data-spage="${esc(p.slug)}" data-lang="${p.language}" data-season="${p.season}" type="button" title="Follow ${esc(p.name)} as Sonarr season ${p.season} of ${esc(r.title)}">${UI.icon('plus')}Season ${p.season} is ${esc(p.name)}${p.language === 'sub' ? ' (sub only)' : ''}</button>`).join('');
     return `<li data-id="${r.id}">${UI.poster(r.id, r.title)}<div class="name"><b title="${esc(r.title)}">${esc(r.title)}${r.year ? ` (${r.year})` : ''}</b><span title="${esc(r.path)}">${esc(r.path)}</span></div>` +
       `<div class="gaps">${[r.gaps > 0 && r.gaps + ' missing', r.undub > 0 && r.undub + ' to dub'].filter(Boolean).join(' · ')} <span>of ${r.total}</span>` +
       `${(r.split || []).length ? ` <span class="tag" title="Also in a folder Sonarr does not track: ${esc(r.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : ''}</div><div class="match">${match}</div><div class="acts">${acts}</div></li>`;
@@ -210,6 +231,18 @@
       const m = li.querySelector('.match');
       m.innerHTML = `<input type="search" placeholder="Search wcostream by name" aria-label="Search wcostream for ${esc(r.title)}" value="${esc(r.title.replace(/\s*\(.*?\)\s*/g, ' ').trim())}"><div class="found"></div>`;
       const input = m.querySelector('input'); input.focus(); input.select(); search(input, r);
+      return;
+    }
+    const sp = ev.target.closest('[data-spage]');
+    if (sp) {
+      sp.disabled = true;
+      try {
+        const res = await api('POST', '/links', { items: [{ slug: sp.dataset.spage, seriesId: r.id, follow: true, language: sp.dataset.lang }] });
+        if (!res.linked) throw new Error(res.skipped[0]?.why || 'the link was refused');
+        await api('POST', '/links/season', { slug: sp.dataset.spage, season: +sp.dataset.season });
+        r.seasonPages = r.seasonPages.filter((p) => p.slug !== sp.dataset.spage);
+        render(); toast(`Season ${sp.dataset.season} of ${r.title} now comes from ${sp.dataset.spage}; the overnight run fills it`);
+      } catch (e) { sp.disabled = false; status(`Could not link that page: ${e.message}`, true); }
       return;
     }
     const also = ev.target.closest('[data-also]');
@@ -296,6 +329,8 @@
   $('drive').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { drive = b.dataset.v; render(); } });
   $('kind').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { kind = b.dataset.v; render(); } });
   $('filter').addEventListener('input', render);
+  $('sort').value = SORTS[sort] || sort === 'folder' ? sort : 'folder';
+  $('sort').addEventListener('change', () => { sort = $('sort').value; try { localStorage.setItem('wco-lib-sort', sort); } catch { /* this visit only */ } render(); });
 
   async function reload() {
     try { rows = (await api('GET', '/library/gaps')).rows; render(); } catch { /* the rows on screen stay */ }

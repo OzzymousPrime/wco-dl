@@ -191,6 +191,13 @@ export class AppController {
     return this.fillService.handShowToSonarr(body);
   }
 
+  /** Fill first (26 Nov 2026): { slug, first: true | episodes a night | false }. */
+  @Post('links/first')
+  @UseGuards(JsonRequestGuard)
+  fillFirst(@Body() body: any) {
+    return this.fillService.setFirst(body);
+  }
+
   @Post('links/no-swap')
   @UseGuards(JsonRequestGuard)
   noSwap(@Body() body: any) {

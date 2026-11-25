@@ -930,6 +930,8 @@
   // Unfollow acts on screen at once (the row goes, the switch turns off) and offers Undo. The request is held back
   // until the toast leaves, so Undo has nothing to take back on the server; the numbering it had is not touched.
   const gone = new Set();                              // slugs unfollowed on screen, their request not sent yet
+  let picking = false, shownSlugs = [], confirmBulk = '';   // picking several followed shows (26 Nov 2026)
+  const fpicked = new Set();
   function unfollow(x) {
     const name = x.title || x.slug, mine = () => show?.series && show.slug === x.slug;
     const next = rowOf(x.slug)?.nextElementSibling || rowOf(x.slug)?.previousElementSibling;
@@ -952,7 +954,64 @@
         rowOf(x.slug)?.querySelector('[data-unfollow]')?.focus({ preventScroll: true });
       } });
   }
+  // Fill first and picking several shows (26 Nov 2026).
+  function renderBulk() {
+    $('fselect').setAttribute('aria-pressed', String(picking));
+    $('fbulk').hidden = !picking;
+    $('fbulkn').textContent = `${fpicked.size} selected`;
+    // The boxes on screen always say what is picked (a row whose markup did not change keeps its old tick otherwise).
+    for (const c of $('followedlist').querySelectorAll('.fpick')) c.checked = fpicked.has(c.closest('li').dataset.key);
+    for (const b of $('fbulk').querySelectorAll('[data-bulk]')) {
+      const k = b.dataset.bulk;
+      if (['first', 'noswap', 'handoff', 'unfollow'].includes(k)) b.disabled = !fpicked.size;
+      if (k === 'handoff' || k === 'unfollow') b.textContent = confirmBulk === k ? `Press again: ${k === 'unfollow' ? 'unfollow' : 'hand to Sonarr'} ${fpicked.size}` : k === 'unfollow' ? 'Unfollow' : 'Hand to Sonarr';
+    }
+  }
+  $('fselect').addEventListener('click', () => { picking = !picking; fpicked.clear(); confirmBulk = ''; renderHome(); });
+  $('followedlist').addEventListener('change', (ev) => {
+    const c = ev.target.closest('.fpick'); if (!c) return;
+    const k = c.closest('li').dataset.key;
+    if (c.checked) fpicked.add(k); else fpicked.delete(k);
+    confirmBulk = ''; renderBulk();
+  });
+  $('fbulk').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-bulk]'); if (!b || b.disabled) return;
+    const k = b.dataset.bulk;
+    if (k === 'done') { picking = false; fpicked.clear(); confirmBulk = ''; renderHome(); return; }
+    if (k === 'all') { for (const s of shownSlugs) fpicked.add(s); confirmBulk = ''; renderHome(); return; }
+    if ((k === 'handoff' || k === 'unfollow') && confirmBulk !== k) { confirmBulk = k; renderBulk(); return; }
+    const shows = followed.filter((x) => fpicked.has(x.slug));
+    const allFirst = shows.every((x) => x.first), allNoSwap = shows.every((x) => x.noSwap);
+    let ok = 0; const bad = [];
+    b.disabled = true;
+    for (const x of shows) {
+      try {
+        if (k === 'first') await api('POST', '/links/first', { slug: x.slug, first: !allFirst });
+        else if (k === 'noswap') await api('POST', '/links/no-swap', { slug: x.slug, noSwap: !allNoSwap });
+        else if (k === 'handoff') await api('POST', '/followed/hand-off', { slug: x.slug });
+        else if (k === 'unfollow') await api('POST', '/follow', { slug: x.slug, seriesId: x.seriesId, follow: false, language: x.language === 'sub' ? 'sub' : 'dub' });
+        ok++;
+      } catch (e) { bad.push(`${x.title || x.slug}: ${e.message}`); }
+    }
+    const did = { first: allFirst ? 'no longer filled first' : 'filled first each night', noswap: allNoSwap ? 'swapped to the dub again' : 'never swapped',
+      handoff: 'handed to Sonarr and no longer followed', unfollow: 'unfollowed' }[k];
+    toast(`${ok} show${ok === 1 ? '' : 's'} ${did}${bad.length ? `; ${bad.length} could not be changed` : ''}`);
+    if (bad.length) status(bad.slice(0, 3).join('; '), true);
+    confirmBulk = ''; fpicked.clear();
+    await loadFollowed(); renderHome();
+  });
   $('followedlist').addEventListener('click', async (ev) => {
+    const fb = ev.target.closest('[data-first]');
+    if (fb) {
+      const x = followed.find((f) => f.slug === fb.closest('li').dataset.key); if (!x) return;
+      fb.disabled = true;
+      try {
+        const r = await api('POST', '/links/first', { slug: x.slug, first: !x.first });
+        x.first = r.first; renderHome();
+        toast(r.first ? `${x.title || x.slug} is filled first each night, ${r.first} episodes a night` : `${x.title || x.slug} takes its usual turn again`);
+      } catch (e) { fb.disabled = false; status(`Could not change it: ${e.message}`, true); }
+      return;
+    }
     const h = ev.target.closest('[data-handoff]');
     if (h) {
       const x = followed.find((f) => f.slug === h.closest('li').dataset.key); if (!x) return;
@@ -1038,15 +1097,20 @@
           : !x.linkWrong && needs(x) && x.onWco > 0 && x.onWco < (x.missing || 0) + (x.undub || 0) ? `<span class="tag" title="Last time wcostream was read it listed ${x.onWco} of the episodes this show needs">${x.onWco} on wcostream</span>`
           : x.unlisted > 0 ? `<span class="tag" title="Last night's plan found ${x.unlisted} episode${x.unlisted === 1 ? '' : 's'} that wcostream does not list, so they were not queued">${x.unlisted} not on wcostream</span>` : '') +
         ((x.notDubbed || []).length ? `<span class="tag" title="Not counted as missing and never fetched. Undo it from Library gaps or the show's map.">${esc(UI.seasonList(x.notDubbed))} never dubbed</span>` : '') +
-        ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '');
+        ((x.split || []).length ? `<span class="tag" title="Also in a folder Sonarr does not track: ${esc(x.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : '') +
+        (x.first ? `<span class="tag ok" title="Planned ahead of every other show each night, ${x.first} episodes a night">fill first</span>` : '');
       const lacks = needs(x) ? `<span class="gapmark">${[x.missing > 0 && x.missing + ' missing', x.undub > 0 && x.undub + ' to dub'].filter(Boolean).join(' · ')}</span>`
         : `<span>${x.countedAt ? 'Complete' : 'Not counted yet'}</span>`;
-      return { key: x.slug, html: `<li><a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
+      return { key: x.slug, html: `<li>${picking ? `<input type="checkbox" class="fpick" aria-label="Select ${esc(name(x))}"${fpicked.has(x.slug) ? ' checked' : ''}>` : ''}<a class="frow" href="/map.html?url=${encodeURIComponent(x.slug)}" title="${esc(name(x))}">${UI.poster(x.seriesId, name(x))}` +
         `<span class="ft"><b class="fname">${esc(name(x))}</b><span class="fmeta">${lacks}${marks}</span></span></a>` +
         (a ? `<span class="live">${a.cur ? (a.cur.state === 'downloading' ? (a.cur.progress ?? 0) + '%' : 'importing') : a.n + ' queued'}</span>` : '') +
         (!x.linkWrong && needs(x) && x.onWco === 0 ? `<button class="btn btn-quiet" data-handoff type="button" aria-label="Hand ${esc(name(x))} to Sonarr" title="wcostream has none of its missing episodes: Sonarr monitors and searches for them, and it is no longer followed">Hand to Sonarr</button>` : '') +
+        (needs(x) ? `<button class="btn btn-quiet" data-first type="button" aria-pressed="${!!x.first}" aria-label="Fill ${esc(name(x))} first" title="${x.first ? 'Filled first each night; press to stop' : 'Plan this show ahead of every other show each night'}">${UI.icon('next')}Fill first</button>` : '') +
         `<button class="btn btn-quiet danger" data-unfollow type="button" aria-label="Unfollow ${esc(name(x))}">${UI.icon('x')}Unfollow</button></li>` };
     }));
+    for (const k of [...fpicked]) if (!here.some((x) => x.slug === k)) fpicked.delete(k);
+    shownSlugs = list.map((x) => x.slug);
+    renderBulk();
   }
   // Needs you, by show (15 Nov 2026): one row per show with what went wrong in a line, one Retry for all of its
   // episodes that can be retried, and its episodes behind a disclosure with their own Retry, Log and Dismiss. The first

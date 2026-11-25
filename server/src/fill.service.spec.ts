@@ -1244,3 +1244,57 @@ describe('a premium-only show goes to Sonarr a batch a night (26 Nov 2026)', () 
     expect(nextPremiumBatch(map, {}, 2).map((e: any) => e.id)).toEqual([3, 4]);
   });
 });
+
+describe('the night order (26 Nov 2026)', () => {
+  const { nightOrder } = require('./fill.service');
+  const show = (name: string, due: number, o: { recent?: number; first?: number; last?: string } = {}) =>
+    ({ name, due: Array.from({ length: due }, (_, i) => i), recent: o.recent ?? 0, pref: { first: o.first, lastPlanned: o.last } });
+  it('puts a fill-first show ahead with its own share, then new episodes, then the fewest due', () => {
+    const got = nightOrder([show('small', 3), show('new', 5, { recent: 2 }), show('pinned', 300, { first: 60 })], 120);
+    expect(got.map((x: any) => [x.plan.name, x.take])).toEqual([['pinned', 60], ['new', 5], ['small', 3]]);
+  });
+  it('keeps a quarter of the night for the shows that waited longest, however large', () => {
+    const many = Array.from({ length: 10 }, (_, i) => show(`s${i}`, 10, { last: '2026-11-25' }));
+    const big = show('backlog', 300, { last: '2026-11-01' });
+    const got = nightOrder([...many, big], 120);
+    expect(got.find((x: any) => x.plan.name === 'backlog')).toBeTruthy();
+    expect(got.reduce((n: number, x: any) => n + x.take, 0)).toBeLessThanOrEqual(120);
+  });
+  it('never plans past the budget', () => {
+    expect(nightOrder([show('pinned', 300, { first: 200 })], 120).map((x: any) => x.take)).toEqual([120]);
+  });
+});
+
+describe('season pages on wcostream (26 Nov 2026)', () => {
+  const { seasonPagesOf } = require('./fill.service');
+  const series = [{ id: 1041, title: 'Bleach', seasons: [{ seasonNumber: 1 }, { seasonNumber: 17 }],
+    alternateTitles: [{ title: 'Bleach: Thousand-Year Blood War', sceneSeasonNumber: 17 }, { title: 'Bleach', seasonNumber: -1 }] },
+    { id: 7, title: 'One Season Show', seasons: [{ seasonNumber: 1 }], alternateTitles: [{ title: 'One Season Show: Part A', sceneSeasonNumber: 1 }] }];
+  const cat = [
+    { name: 'Bleach: Thousand-Year Blood War', path: 'bleach-thousand-year-blood-war', list: 'dubbed' },
+    { name: 'Bleach: Thousand-Year Blood War', path: 'bleach-thousand-year-blood-war', list: 'subbed' },
+    { name: 'Bleach', path: 'bleach', list: 'dubbed' },
+    { name: 'One Season Show: Part A', path: 'one-season-show-part-a', list: 'dubbed' },
+  ];
+  it('finds the page named as one season, once, as its dub', () => {
+    expect(seasonPagesOf(series, cat, new Set()).get(1041)).toEqual([{ slug: 'bleach-thousand-year-blood-war', name: 'Bleach: Thousand-Year Blood War', language: 'dub', season: 17 }]);
+  });
+  it('leaves out a page already linked, and a series of one season', () => {
+    expect(seasonPagesOf(series, cat, new Set(['bleach-thousand-year-blood-war'])).get(1041)).toBeUndefined();
+    expect(seasonPagesOf(series, cat, new Set()).get(7)).toBeUndefined();
+  });
+});
+
+describe('a show refused again after the wait stops for the night (26 Nov 2026)', () => {
+  const { stopForNight } = require('./fill.service');
+  it("cancels only that show's queued episodes in overnight runs, not in Fill now or other shows", () => {
+    const ep = (id: number, state: string) => ({ id, s: 1, e: id, title: '', mode: 'missing', state });
+    const jobs = [
+      { slug: 'batwheels', auto: true, episodes: [ep(1, 'failed'), ep(2, 'queued'), ep(3, 'queued')] },
+      { slug: 'batwheels', auto: true, now: true, episodes: [ep(4, 'queued')] },
+      { slug: 'other', auto: true, episodes: [ep(5, 'queued')] },
+    ];
+    expect(stopForNight(jobs, 'batwheels')).toBe(2);
+    expect(jobs.flatMap((j) => j.episodes.map((e) => e.state))).toEqual(['failed', 'cancelled', 'cancelled', 'queued', 'queued']);
+  });
+});

@@ -32,6 +32,9 @@
       <div class="seg" role="group" aria-label="Drive" id="drive"></div>
       <div class="seg" role="group" aria-label="State" id="kind"></div>
       <span class="grow"></span>
+      <label class="sortby"><span>Sort</span><select id="sort" aria-label="Sort the series">
+        <option value="folder">by folder, then name</option><option value="name">by name</option><option value="missing">most missing first</option>
+        <option value="onwco">most on wcostream first</option><option value="newest">newest episode first</option></select></label>
       <input id="filter" type="search" placeholder="Filter by name" aria-label="Filter series by name" autocomplete="off">
     </div>
     <p class="hint">Following a show links it and lets the overnight run (between <span data-night>01:00 and 07:00</span>, <span data-budget>120</span> episodes a night, shortest lists first) fill its gaps. Nothing downloads when you press Follow.</p>

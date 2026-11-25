@@ -155,6 +155,80 @@ export function nextPremiumBatch<T extends { id: number; st: string; a?: string 
   return map.filter((e) => e.st === 'missing' && !tries[e.id]?.handedToSonarr).sort((x, y) => (y.a ?? '').localeCompare(x.a ?? '') || y.id - x.id).slice(0, n);
 }
 
+/** Stop a show's overnight runs for the night (26 Nov 2026): its queued episodes are cancelled; returns how many. */
+export function stopForNight(jobs: FillJob[], slug: string): number {
+  let stopped = 0;
+  for (const j of jobs) if (j.slug === slug && j.auto && !j.now) for (const e of j.episodes) if (e.state === 'queued') {
+    e.state = 'cancelled'; e.message = 'Stopped for tonight: the video server refused this show again after a wait; planned again tomorrow'; stopped++;
+  }
+  return stopped;
+}
+
+/** A fill-first show gets this many episodes a night unless another number is set (26 Nov 2026). */
+export const FIRST_PER_NIGHT = 40;
+
+/**
+ * The night's order of shows (26 Nov 2026). Fill-first shows go first, each with its own share; then shows with new
+ * episodes, then the fewest due; a quarter of what is left goes to the shows that have waited longest, so a large
+ * backlog is reached. Returns each show with how many of its episodes to plan, until the budget is spent.
+ */
+export function nightOrder<T extends { due: unknown[]; recent: number; pref: { lastPlanned?: string; first?: number } }>(plans: T[], budget: number): { plan: T; take: number }[] {
+  const out: { plan: T; take: number }[] = [];
+  const firsts = plans.filter((x) => (x.pref.first ?? 0) > 0);
+  for (const x of firsts) {
+    if (budget <= 0) break;
+    const take = Math.min(x.due.length, x.pref.first!, budget);
+    out.push({ plan: x, take }); budget -= take;
+  }
+  const rest = plans.filter((x) => !firsts.includes(x))
+    .sort((a, b) => Number(b.recent > 0) - Number(a.recent > 0) || a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
+  const waited = rest.filter((x) => !x.recent).sort((a, b) => (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? '') || b.due.length - a.due.length);
+  const picked = new Set<T>();
+  let kept = Math.floor(budget / 4), ahead = budget - kept;
+  const add = (x: T) => { const take = Math.min(40, x.due.length, budget); if (take <= 0) return; out.push({ plan: x, take }); picked.add(x); budget -= take; return take; };
+  for (const x of rest) { if (ahead <= 0 || budget <= 0) break; ahead -= add(x) ?? 0; }
+  for (const x of waited) { if (kept <= 0 || budget <= 0) break; if (picked.has(x)) continue; kept -= add(x) ?? 0; }
+  for (const x of rest) { if (budget <= 0) break; if (!picked.has(x)) add(x); }
+  return out;
+}
+
+/**
+ * Season pages (26 Nov 2026): wcostream shows whose name is Sonarr's own name for one season of a series, by series.
+ * `taken` are the slugs already linked. One pass over the catalogue, through an index of the season names.
+ */
+export function seasonPagesOf(series: { id: number; title: string; alternateTitles?: { title: string; seasonNumber?: number; sceneSeasonNumber?: number }[]; seasons?: { seasonNumber: number }[] }[],
+  catalogue: CatalogueItem[], taken: Set<string>): Map<number, { slug: string; name: string; language: 'dub' | 'sub'; season: number }[]> {
+  const byName = new Map<string, { id: number; season: number }[]>();
+  for (const s of series) {
+    const whole = new Set([normaliseTitle(s.title), ...(s.alternateTitles ?? []).filter((a) => !((a.seasonNumber ?? 0) > 0 || (a.sceneSeasonNumber ?? 0) > 0)).map((a) => normaliseTitle(a.title))]);
+    const regular = new Set((s.seasons ?? []).map((x) => x.seasonNumber).filter((n) => n > 0));
+    const named = new Map<string, Set<number>>();
+    for (const a of s.alternateTitles ?? []) {
+      const n = (a.seasonNumber ?? 0) > 0 ? a.seasonNumber! : (a.sceneSeasonNumber ?? 0) > 0 ? a.sceneSeasonNumber! : 0;
+      const k = normaliseTitle(a.title);
+      if (!n || !k || whole.has(k) || (s.seasons && !regular.has(n))) continue;
+      (named.get(k) ?? named.set(k, new Set()).get(k)!).add(n);
+    }
+    if (regular.size < 2) continue;
+    for (const [k, ns] of named) if (ns.size === 1) (byName.get(k) ?? byName.set(k, []).get(k)!).push({ id: s.id, season: [...ns][0] });
+  }
+  const out = new Map<number, { slug: string; name: string; language: 'dub' | 'sub'; season: number }[]>();
+  const seen = new Set<string>();
+  // Dubbed and cartoon entries first: a show on both lists is offered as its dub.
+  for (const i of [...catalogue].sort((a, b) => Number(a.list === 'subbed') - Number(b.list === 'subbed'))) {
+    const slug = i.path.toLowerCase();
+    if (taken.has(slug) || seen.has(slug)) continue;
+    const hits = [...new Set([catalogueKey(i.name), catalogueKey(i.path.replace(/-/g, ' '))])].flatMap((k) => byName.get(k) ?? []);
+    const one = [...new Map(hits.map((h) => [`${h.id}|${h.season}`, h])).values()];
+    if (one.length !== 1) continue;
+    seen.add(slug);
+    const list = out.get(one[0].id) ?? out.set(one[0].id, []).get(one[0].id)!;
+    if (!list.some((x) => x.season === one[0].season && x.language !== 'sub')) list.push({ slug, name: i.name, language: i.list === 'subbed' ? 'sub' : 'dub', season: one[0].season });
+  }
+  for (const list of out.values()) list.sort((a, b) => a.season - b.season || Number(a.language === 'sub') - Number(b.language === 'sub'));
+  return out;
+}
+
 /** Which handed-over episodes are searched for tonight: the newest `cap` by air date; the rest are only monitored. */
 export function newestIds(groups: { id: number; a?: string }[][], cap: number): Set<number> {
   return new Set(groups.flat().sort((x, y) => (y.a ?? '').localeCompare(x.a ?? '') || y.id - x.id).slice(0, cap).map((e) => e.id));
@@ -239,6 +313,8 @@ interface ShowPref {
   season?: number;
   /** The page carries only part of the series (or of its season): only what it lists is this link's (see markPart). */
   part?: boolean;
+  /** Fill first (26 Nov 2026): planned ahead of every other show each night, this many episodes a night. */
+  first?: number;
   /** Episodes wcostream refused as premium-only since the last one it gave (see PREMIUM_SHOW_EPISODES). */
   premium?: { n: number; at: string };
   /** Why the show rests (`deadUntil`): 'premium' when wcostream keeps it for paying members; else its videos were refused. */
@@ -811,6 +887,17 @@ export class FillService implements OnApplicationBootstrap {
     return { slug, noSwap: !!prefs[slug].noSwap };
   }
 
+  /** Fill first (26 Nov 2026): { slug, first: true | number of episodes a night } puts the show ahead each night; false ends it. */
+  async setFirst(body: { slug?: string; first?: boolean | number }) {
+    let slug: string;
+    try { slug = parseShowLink(String(body?.slug ?? '')).slug; } catch (e) { throw new BadRequestException((e as Error).message); }
+    const n = typeof body?.first === 'number' ? Math.round(body.first) : body?.first ? FIRST_PER_NIGHT : 0;
+    if (n < 0 || n > 200) throw new BadRequestException('Between 1 and 200 episodes a night');
+    const prefs = await this.changePrefs((p) => { if (!p[slug]) return; if (n) p[slug].first = n; else delete p[slug].first; });
+    if (!prefs[slug]) throw new NotFoundException('That show is not linked');
+    return { slug, first: prefs[slug].first ?? 0 };
+  }
+
   // ---------- Adding a show to Sonarr from a wcostream search result ----------
   /** New shows go where the most recently added animated series went, with its profile and settings. */
   async addDefaults() {
@@ -1152,6 +1239,13 @@ export class FillService implements OnApplicationBootstrap {
               e.message = brakeMessage(job.refused, until, !!job.auto && !job.now);
             }
             this.logger.warn(`${job.title}: ${job.refused} refusals in a row, waiting ${wait} minutes`);
+            // Refused again after a wait, in an overnight run: the show stops for the night (26 Nov 2026: Batwheels
+            // was refused 25 times on the first night). Its episodes are planned again the next night.
+            if (job.auto && !job.now && job.refused > REFUSED_LIMIT) {
+              const stopped = stopForNight(this.jobs, job.slug);
+              if (stopped) this.nightNotes.push(`${job.title}: stopped for the night after the video server refused it again (${stopped} episode${stopped === 1 ? '' : 's'} left for tomorrow)`);
+              this.logger.warn(`${job.title}: refused again after the wait; ${stopped} episode(s) stopped for tonight`);
+            }
           }
         } else if (ep.state === 'done') job.refused = 0;
         await this.logAttempt(job, ep);
@@ -1633,6 +1727,7 @@ export class FillService implements OnApplicationBootstrap {
       }
     }
     const index = indexCatalogue(catalogue);
+    const seasonPages = seasonPagesOf(all, catalogue, new Set(Object.keys(prefs)));
     const split = await this.splitFolders();
     const root = (p: string) => /^([A-Za-z]:[\\/][^\\/]+|\/[^/]+)/.exec(String(p ?? ''))?.[1] ?? String(p ?? '');
     // A linked show uses its real count (unmonitored episodes included) once it has one, so a show Sonarr calls
@@ -1648,7 +1743,7 @@ export class FillService implements OnApplicationBootstrap {
       .filter((x) => (x.gaps > 0 || x.undub > 0) && (x.link || (x.s.genres ?? []).some((g: string) => g === 'Animation' || g === 'Anime')))
       .map(({ s, link, total, gaps, undub }) => {
         const base = { id: s.id as number, title: s.title as string, year: s.year as number, path: s.path as string, root: root(s.path), gaps, undub, total,
-          split: split.get(s.id) ?? [] };
+          split: split.get(s.id) ?? [], latest: (s.previousAiring ?? '') as string, seasonPages: seasonPages.get(s.id) ?? [] };
         if (link) {
           const p = link.pref, gap = p.counts?.gap;
           // Other wcostream shows of this name, for a link that lists nothing or lacks seasons (23 Nov 2026): the fix offered.
@@ -1656,7 +1751,7 @@ export class FillService implements OnApplicationBootstrap {
           // The same when its only link is one season's or a part page: the rest of the series may be on another page.
           const others = (gap && (gap.why === 'empty' || gap.seasons?.length)) || p.season || p.part ? alternatives(s, index, catalogue, taken) : [];
           return { ...base, state: p.follow ? 'following' : 'linked', slug: link.slug, language: p.language ?? 'dub', candidates: others,
-            onWco: p.counts?.onWco, gap, notDubbed: p.notDubbed ?? [], season: p.season, part: !!p.part, linkWrong: p.linkOk ? undefined : p.linkWrong?.why,
+            onWco: p.counts?.onWco, gap, notDubbed: p.notDubbed ?? [], season: p.season, part: !!p.part, first: p.first ?? 0, linkWrong: p.linkOk ? undefined : p.linkWrong?.why,
             resting: p.deadUntil && p.deadUntil > new Date().toISOString() ? p.deadUntil : undefined, restWhy: p.restWhy,
             pages: Object.entries(prefs).filter(([k, x]) => k !== link.slug && x.seriesId === s.id && x.follow && (x.season || x.part)).map(([k, x]) => ({ slug: k, season: x.season, part: !!x.part })) };
         }
@@ -1769,7 +1864,7 @@ export class FillService implements OnApplicationBootstrap {
         unlisted: p.unlisted?.ids.length ?? 0, switchTo: switchTo(p),
         onWco: p.counts?.onWco, linkWrong: p.linkOk ? undefined : p.linkWrong?.why, noSwap: !!p.noSwap, season: p.season,
         gap: p.counts?.gap, notDubbed: p.notDubbed ?? [],
-        resting: p.deadUntil && p.deadUntil > new Date().toISOString() ? p.deadUntil : undefined, restWhy: p.restWhy, part: !!p.part };
+        resting: p.deadUntil && p.deadUntil > new Date().toISOString() ? p.deadUntil : undefined, restWhy: p.restWhy, part: !!p.part, first: p.first ?? 0 };
     });
   }
 
@@ -1921,21 +2016,13 @@ export class FillService implements OnApplicationBootstrap {
     }
     // Shows with new episodes first (22 Nov 2026: 350 followed shows and about 2,000 due against 120 a night buried new
     // weekly episodes behind backlogs), then the fewest due, then the longest since last planned.
-    plans.sort((a, b) => Number(b.recent > 0) - Number(a.recent > 0) || a.due.length - b.due.length || (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? ''));
-    // A quarter of the night goes to the shows that have waited longest, whatever their size (26 Nov 2026: with the
-    // fewest-due-first order a show with a few hundred due was never reached while smaller ones kept arriving).
-    const waited = plans.filter((x) => !x.recent).sort((a, b) => (a.pref.lastPlanned ?? '').localeCompare(b.pref.lastPlanned ?? '') || b.due.length - a.due.length);
-    const queueOrder: typeof plans = [];
-    let kept = Math.floor(budget / 4), ahead = budget - kept;
-    for (const x of plans) { if (ahead <= 0) break; queueOrder.push(x); ahead -= Math.min(40, x.due.length); }
-    for (const x of waited) { if (kept <= 0) break; if (queueOrder.includes(x)) continue; queueOrder.push(x); kept -= Math.min(40, x.due.length); }
-    for (const x of plans) if (!queueOrder.includes(x)) queueOrder.push(x);
-    for (const { slug, pref, due } of queueOrder) {
+    // Fill-first shows, then new episodes, then the fewest due, with a quarter for the longest waiting (see nightOrder).
+    for (const { plan: { slug, pref, due }, take } of nightOrder(plans, budget)) {
       if (budget <= 0) break;
       try {
         const tries = (pref.tries ??= {});
         const job = await this.createJob({ seriesId: pref.seriesId, slug, language: pref.language ?? 'dub',
-          absolute: pref.absolute, episodeIds: due.slice(0, Math.min(40, budget)), auto: true, now });
+          absolute: pref.absolute, episodeIds: due.slice(0, Math.min(take, budget, 200)), auto: true, now });
         made.push(job);
         budget -= job.episodes.length;
         pref.lastPlanned = new Date().toISOString();

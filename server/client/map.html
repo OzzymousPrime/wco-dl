@@ -105,7 +105,17 @@
       <div class="seg" role="group" aria-label="Which followed shows" id="fkind">
         <button type="button" data-v="incomplete" aria-pressed="true">Incomplete <span class="count" id="fincomplete"></span></button><button type="button" data-v="all" aria-pressed="false">All <span class="count" id="fall"></span></button>
       </div>
-      <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off"></div>
+      <input id="ffilter" type="search" placeholder="Filter by name" aria-label="Filter followed shows" autocomplete="off">
+      <button class="btn btn-quiet" id="fselect" type="button" data-icon="check" aria-pressed="false">Select</button></div>
+    <div class="fbulk" id="fbulk" role="toolbar" aria-label="Act on the selected shows" hidden>
+      <b id="fbulkn">0 selected</b>
+      <button class="btn" type="button" data-bulk="all">Select all shown</button>
+      <button class="btn" type="button" data-bulk="first">Fill first</button>
+      <button class="btn" type="button" data-bulk="noswap">Never swap</button>
+      <button class="btn" type="button" data-bulk="handoff">Hand to Sonarr</button>
+      <button class="btn danger" type="button" data-bulk="unfollow">Unfollow</button>
+      <button class="linkbtn" type="button" data-bulk="done">Done</button>
+    </div>
     <!-- Until the first answer arrives the list holds four still, grey rows, so the screen is never blank. -->
     <ul class="flist" id="followedlist" aria-busy="true">
       <li class="sk" aria-hidden="true"><span class="poster"></span><span class="ft"><i style="width:62%"></i><i style="width:40%"></i></span></li>

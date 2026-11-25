@@ -258,3 +258,14 @@ describe('new on wcostream (26 Nov 2026)', () => {
     expect(newlySeen(seen, many, 30, Date.parse('2026-11-28T00:00:00Z'))).toEqual([]);
   });
 });
+
+describe('a second series on one page (26 Nov 2026)', () => {
+  const { pageOf, aliasFor } = require('./fill.util');
+  it('reads "page~seriesId" as its own link to the same page', () => {
+    expect(parseShowLink('bluey~5150')).toEqual({ slug: 'bluey~5150' });
+    expect(pageOf('bluey~5150')).toBe('bluey');
+    expect(pageOf('bluey')).toBe('bluey');
+    expect(aliasFor('bluey~3', 5150)).toBe('bluey~5150');
+    expect(() => parseShowLink('../x~5')).toThrow();
+  });
+});

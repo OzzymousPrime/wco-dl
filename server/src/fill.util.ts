@@ -41,9 +41,23 @@ export function episodeName(name: string, fromLink: boolean): { slug: string; se
     language: lang ? (lang[1] === 'dubbed' ? 'dub' : 'sub') : undefined };
 }
 
+/**
+ * One wcostream page can carry several Sonarr series (26 Nov 2026: the Bluey page holds the show, its Minisodes and
+ * compilations). The first series links the page under its own name; each further one under "page~seriesId", a link
+ * that owns only the episodes the page has by title. pageOf gives the page such a link reads.
+ */
+const ALIAS = /^(.+)~(\d+)$/;
+export function pageOf(key: string): string {
+  const m = ALIAS.exec(String(key ?? ''));
+  return m ? m[1] : String(key ?? '');
+}
+export function aliasFor(slug: string, seriesId: number): string { return `${pageOf(slug)}~${seriesId}`; }
+
 export function parseShowLink(input: string): ShowLink {
   const text = String(input ?? '').trim();
   if (!text) throw new Error('Paste a wcostream show link');
+  const alias = ALIAS.exec(text);
+  if (alias && SLUG.test(alias[1])) return { slug: text.toLowerCase() };
   if (SLUG.test(text)) {
     const ep = episodeName(text, false);
     if (!ep) return { slug: text.toLowerCase() };

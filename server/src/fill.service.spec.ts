@@ -604,6 +604,18 @@ describe('FillService worker', () => {
     expect(made.find((j) => j.slug === 're-zero-part-two')!.episodes.map((e) => e.id)).toEqual([101, 102]);
   });
 
+  it('a page that already feeds one series is linked again for another, as a part (26 Nov 2026, Bluey Minisodes)', async () => {
+    const svc = new FillService((service as any).config);
+    (svc as any).allSeries = async () => [{ id: 3123, title: 'Bluey' }, { id: 5150, title: 'Bluey Minisodes' }];
+    await svc.setFollow({ slug: 'bluey', seriesId: 3123, follow: true, language: 'dub' });
+    expect(await svc.setLinks({ items: [{ slug: 'bluey', seriesId: 5150, follow: true, language: 'dub' }] })).toMatchObject({ linked: 1, skipped: [] });
+    const prefs = JSON.parse(await fs.readFile(path.join(dir, 'config', 'show-prefs.json'), 'utf8'));
+    expect(prefs.bluey).toMatchObject({ seriesId: 3123, follow: true });
+    expect(prefs['bluey~5150']).toMatchObject({ seriesId: 5150, follow: true, part: true, language: 'dub' });
+    expect(await svc.setLinks({ items: [{ slug: 'bluey', seriesId: 5150 }] })).toMatchObject({ linked: 1 });     // the same again: no third link
+    expect(Object.keys(JSON.parse(await fs.readFile(path.join(dir, 'config', 'show-prefs.json'), 'utf8'))).filter((k) => k.startsWith('bluey'))).toEqual(['bluey', 'bluey~5150']);
+  });
+
   it('a relink unfollows the old link of the same series and keeps its season rules', async () => {
     const svc = new FillService((service as any).config);
     (svc as any).allSeries = async () => [{ id: 575, title: 'Re: ZERO' }];
@@ -1296,5 +1308,18 @@ describe('a show refused again after the wait stops for the night (26 Nov 2026)'
     ];
     expect(stopForNight(jobs, 'batwheels')).toBe(2);
     expect(jobs.flatMap((j) => j.episodes.map((e) => e.state))).toEqual(['failed', 'cancelled', 'cancelled', 'queued', 'queued']);
+  });
+});
+
+describe('pages named by their season number (26 Nov 2026, Avatar Book 1 Water)', () => {
+  const { seasonPagesOf } = require('./fill.service');
+  const avatar = [{ id: 997, title: 'Avatar: The Last Airbender', seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }, { seasonNumber: 3 }], alternateTitles: [] }];
+  it('reads "Book 1", "Season 2" and "Part 3" after the series name', () => {
+    const cat = [{ name: 'Avatar The Last Airbender Book 1 Water', path: 'avatar-the-last-airbender-book-1-water', list: 'cartoon' },
+      { name: 'Avatar The Last Airbender Season 2', path: 'avatar-season-2', list: 'cartoon' },
+      { name: 'Avatar The Last Airbender Part 3: Fire', path: 'atla-p3', list: 'cartoon' },
+      { name: 'Avatar The Last Airbender Book 9', path: 'atla-b9', list: 'cartoon' },
+      { name: 'Avatar Extras', path: 'avatar-extras', list: 'cartoon' }];
+    expect(seasonPagesOf(avatar, cat, new Set()).get(997).map((p: any) => [p.slug, p.season])).toEqual([['avatar-the-last-airbender-book-1-water', 1], ['avatar-season-2', 2], ['atla-p3', 3]]);
   });
 });

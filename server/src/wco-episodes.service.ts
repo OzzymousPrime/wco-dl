@@ -7,7 +7,7 @@ import { APP_CONFIG } from './app-config.provider';
 import { AppConfig } from './config';
 import { AppService } from './app.service';
 import { buildListing, parseEpisodeLinks, WcoListing } from './wco-episodes.util';
-import { CatalogueItem } from './fill.util';
+import { CatalogueItem, pageOf } from './fill.util';
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 /** A page that listed nothing is read again after this long (26 Nov 2026: Digimon Tamers came back empty once and was "0 on wcostream" for six hours and the nights that followed). */
@@ -67,10 +67,10 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
   get health() { return this.app?.health; }
 
   /** When the kept listing was read (ms), for the map's "read 2 hours ago". */
-  readAt(slug: string, language: string): number | undefined { return this.cache.get(`${slug}|${language}`)?.at; }
+  readAt(slug: string, language: string): number | undefined { return this.cache.get(`${pageOf(slug)}|${language}`)?.at; }
 
   peek(slug: string, language: string): WcoListing | undefined {
-    const hit = this.cache.get(`${slug}|${language}`);
+    const hit = this.cache.get(`${pageOf(slug)}|${language}`);
     return hit && Date.now() - hit.at < keepFor(hit.listing) ? hit.listing : undefined;
   }
 
@@ -95,7 +95,8 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
    * posted since then would otherwise stay hidden for up to six hours. Asked for by a pasted episode link and by the
    * map's "Check wcostream again".
    */
-  listing(slug: string, language: string, fresh = false): Promise<WcoListing | undefined> {
+  listing(link: string, language: string, fresh = false): Promise<WcoListing | undefined> {
+    const slug = pageOf(link);                         // a second series' link reads the same page (26 Nov 2026)
     const key = `${slug}|${language}`;
     const before = this.cache.get(key)?.at;            // the copy a fresh read must replace
     const hit = fresh ? undefined : this.peek(slug, language);

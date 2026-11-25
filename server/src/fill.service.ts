@@ -26,7 +26,7 @@ import {
   matchSeries,
   parsePremium,
   parseProgress,
-  parseShowLink, CatalogueItem, CatalogueMatch, indexCatalogue, matchCatalogue, alternatives, namedAs, seasonNamed, noteSeen, newlySeen, CatalogueSeen, audioStatus, catalogueKey, normaliseTitle,
+  parseShowLink, CatalogueItem, CatalogueMatch, indexCatalogue, matchCatalogue, alternatives, namedAs, seasonNamed, pageOf, aliasFor, titleWords, noteSeen, newlySeen, CatalogueSeen, audioStatus, catalogueKey, normaliseTitle,
   playVerdict, Probe,
 } from './fill.util';
 import { diskState, DiskState, lowDiskMessage } from './disk-space';
@@ -212,13 +212,34 @@ export function seasonPagesOf(series: { id: number; title: string; alternateTitl
     if (regular.size < 2) continue;
     for (const [k, ns] of named) if (ns.size === 1) (byName.get(k) ?? byName.set(k, []).get(k)!).push({ id: s.id, season: [...ns][0] });
   }
+  // Pages named "<series> Season 2", "<series> Book 1 Water", "<series> Part 3" (26 Nov 2026: Avatar's three Books).
+  const byWords = new Map<string, { id: number; seasons: Set<number> }[]>();
+  for (const s of series) {
+    const regular = new Set((s.seasons ?? []).map((x) => x.seasonNumber).filter((n) => n > 0));
+    if (regular.size < 2) continue;
+    for (const t of [s.title, ...(s.alternateTitles ?? []).filter((a) => !((a.seasonNumber ?? 0) > 0 || (a.sceneSeasonNumber ?? 0) > 0)).map((a) => a.title)]) {
+      const k = titleWords(t).join(' ');
+      if (k) (byWords.get(k) ?? byWords.set(k, []).get(k)!).push({ id: s.id, seasons: regular });
+    }
+  }
+  const numbered = (i: CatalogueItem) => {
+    const w = titleWords(i.name.replace(/\b(english|dubbed|subbed|dub|sub)\b/gi, ' '));
+    for (let j = 1; j < w.length - 1; j++) {
+      if (!['season', 'book', 'part', 'series'].includes(w[j]) || !/^\d{1,2}$/.test(w[j + 1])) continue;
+      const n = Number(w[j + 1]);
+      const hits = [...new Map((byWords.get(w.slice(0, j).join(' ')) ?? []).filter((h) => h.seasons.has(n)).map((h) => [h.id, h])).values()];
+      return hits.length === 1 ? [{ id: hits[0].id, season: n }] : [];
+    }
+    return [];
+  };
   const out = new Map<number, { slug: string; name: string; language: 'dub' | 'sub'; season: number }[]>();
   const seen = new Set<string>();
   // Dubbed and cartoon entries first: a show on both lists is offered as its dub.
   for (const i of [...catalogue].sort((a, b) => Number(a.list === 'subbed') - Number(b.list === 'subbed'))) {
     const slug = i.path.toLowerCase();
     if (taken.has(slug) || seen.has(slug)) continue;
-    const hits = [...new Set([catalogueKey(i.name), catalogueKey(i.path.replace(/-/g, ' '))])].flatMap((k) => byName.get(k) ?? []);
+    const named = [...new Set([catalogueKey(i.name), catalogueKey(i.path.replace(/-/g, ' '))])].flatMap((k) => byName.get(k) ?? []);
+    const hits = named.length ? named : numbered(i);
     const one = [...new Map(hits.map((h) => [`${h.id}|${h.season}`, h])).values()];
     if (one.length !== 1) continue;
     seen.add(slug);
@@ -1337,7 +1358,7 @@ export class FillService implements OnApplicationBootstrap {
     ep.state = 'downloading'; ep.progress = 0;
     await this.save();
 
-    const args = [pythonScript, '-i', byTitle ? byTitle.url : WCO_SHOW + job.slug, '-q', ep.quality ?? job.quality];
+    const args = [pythonScript, '-i', byTitle ? byTitle.url : WCO_SHOW + pageOf(job.slug), '-q', ep.quality ?? job.quality];
     if (!byTitle) {
       if (job.language) args.push('--lang', job.language);
       if (job.absolute) {
@@ -1681,8 +1702,16 @@ export class FillService implements OnApplicationBootstrap {
         try { slug = parseShowLink(String(it?.slug ?? '')).slug; } catch { skipped.push({ slug: String(it?.slug ?? ''), why: 'not a show link' }); continue; }
         const series = all.find((s) => s.id === Number(it.seriesId));
         if (!series) { skipped.push({ slug, why: 'that series is not in Sonarr' }); continue; }
-        const had = prefs[slug];
-        if (had && had.seriesId !== series.id) { skipped.push({ slug, why: 'already linked to another series' }); continue; }
+        let had = prefs[slug];
+        // The page already feeds another series (Bluey and Bluey Minisodes on one page, 26 Nov 2026): this series gets
+        // its own link to it, which owns only what the page has by title.
+        if (had && had.seriesId !== series.id) {
+          const alias = aliasFor(slug, series.id);
+          if (prefs[alias] && prefs[alias].seriesId !== series.id) { skipped.push({ slug, why: 'already linked to another series' }); continue; }
+          slug = alias; had = prefs[alias];
+          if (!had) prefs[slug] = { seriesId: series.id, title: series.title, part: true } as ShowPref;
+          had = prefs[slug];
+        }
         // A new link named as one season of the series is that season's link (26 Nov 2026); `part`: only what the page lists.
         const named = had ? undefined : seasonNamed(slug, series);
         prefs[slug] = { ...had, seriesId: series.id, title: series.title, absolute: named ? true : had?.absolute ?? false,

@@ -117,9 +117,21 @@ export function matchSeries<T extends SeriesLike>(slug: string, series: T[]): T[
     .flatMap((t) => [t, t.replace(/&/g, ' ')]).map(normaliseTitle).filter(Boolean);
   const exact = series.filter((s) => keys(s).includes(want));
   if (exact.length) return exact;
+  // A partial match is one name starting with the other in whole words (26 Nov 2026: "magi" is the start of the
+  // letters of "magic-knight-rayearth-2026", so Magi: The Labyrinth of Magic was offered and linked).
+  const mine = titleWords(name.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
+  const leads = (a: string[], b: string[]) => a.length > 0 && a.length <= b.length && a.every((w, i) => w === b[i]);
   return series
-    .filter((s) => keys(s).some((k) => k.length > 3 && (k.startsWith(want) || want.startsWith(k))))
+    .filter((s) => [s.title, ...(s.alternateTitles ?? []).map((a) => a.title)].map(titleWords)
+      .some((w) => w.join('').length > 3 && (leads(w, mine) || leads(mine, w))))
     .slice(0, 8);
+}
+
+/** A name as words, the way normaliseTitle reads it: lower case, no accents, "&" as "and", a release year left out. */
+export function titleWords(s: string): string[] {
+  return String(s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ')
+    .replace(/\((19|20)\d\d\)|\b(19|20)\d\d\b/g, (y) => (Number(y.replace(/\D/g, '')) <= new Date().getFullYear() + 2 ? ' ' : y))
+    .replace(/'/g, '').split(/[^a-z0-9]+/).filter(Boolean);
 }
 
 /** The last percentage in a chunk of downloader output (tqdm: "Downloading:  43%|####"), or undefined. */

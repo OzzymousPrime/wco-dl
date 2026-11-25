@@ -1,6 +1,7 @@
 import {
   alternatives,
   namedAs,
+  titleWords,
   dubVerdict,
   indexCatalogue,
   fileEpisode,
@@ -167,5 +168,22 @@ describe('names with numbers, and linking by itself', () => {
     const pups = { id: 1, title: 'Paw Patrol: The Mighty Pups' };
     expect(matchSeries('paw-patrol', [pups])).toEqual([pups]);              // offered
     expect(namedAs('paw-patrol', pups)).toBe(false);                        // not taken
+  });
+});
+
+// 26 Nov 2026: "magi" is the start of the letters of "magic knight rayearth", so Magi was linked to Rayearth.
+describe('partial names match in whole words', () => {
+  const magi = { id: 4662, title: 'Magi: The Labyrinth of Magic', alternateTitles: [{ title: 'Magi' }] };
+  const pups = { id: 1, title: 'Paw Patrol: The Mighty Pups' };
+  it('a name is not the start of another by its letters alone', () => {
+    expect(matchSeries('magic-knight-rayearth-2026', [magi])).toEqual([]);
+  });
+  it('still offers a name that leads with the same words', () => {
+    expect(matchSeries('paw-patrol', [pups])).toEqual([pups]);
+    expect(matchSeries('magi-the-labyrinth-of-magic-season-2', [magi])).toEqual([magi]);
+  });
+  it('reads words the way names are compared', () => {
+    expect(titleWords("Captain Thimble's Tugboat (2012)")).toEqual(['captain', 'thimbles', 'tugboat']);
+    expect(titleWords('Mao 2099')).toEqual(['mao', '2099']);
   });
 });

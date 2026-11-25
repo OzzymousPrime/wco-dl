@@ -90,7 +90,33 @@ export interface SeriesLike {
   year?: number;
   titleSlug?: string;
   path?: string;
-  alternateTitles?: { title: string }[];
+  alternateTitles?: { title: string; seasonNumber?: number; sceneSeasonNumber?: number }[];
+  seasons?: { seasonNumber: number }[];
+}
+
+/**
+ * The one Sonarr season a wcostream show is, going by its name (26 Nov 2026). Sonarr keeps Bleach as one series whose
+ * season 17 it also knows as "Bleach: Thousand-Year Blood War"; wcostream has a show of that name, numbered from 1. Linked
+ * as the whole series its episode 1 was Bleach 1x01, so none of it matched. Undefined when the name is the series' own,
+ * names several seasons, or the series has a single season.
+ */
+export function seasonNamed(slug: string, s: SeriesLike): number | undefined {
+  let name = slug;
+  try { name = decodeURIComponent(slug); } catch { /* keep it as written */ }
+  const want = normaliseTitle(name.replace(/-/g, ' ').replace(/\b(english|dubbed|subbed|dub|sub)\b/g, ''));
+  if (!want) return undefined;
+  const keys = (t: string) => [t, t.replace(/&/g, ' ')].map(normaliseTitle);
+  const whole = [s.title, (s.titleSlug ?? '').replace(/-/g, ' ')].flatMap(keys);
+  const named = new Set<number>();
+  for (const a of s.alternateTitles ?? []) {
+    const n = (a.seasonNumber ?? 0) > 0 ? a.seasonNumber! : (a.sceneSeasonNumber ?? 0) > 0 ? a.sceneSeasonNumber! : 0;
+    if (!n) whole.push(...keys(a.title)); else if (keys(a.title).includes(want)) named.add(n);
+  }
+  if (whole.includes(want) || named.size !== 1) return undefined;
+  const n = [...named][0];
+  const regular = (s.seasons ?? []).filter((x) => x.seasonNumber > 0);
+  if (s.seasons && (regular.length < 2 || !regular.some((x) => x.seasonNumber === n))) return undefined;
+  return n;
 }
 
 /** Is one of the series' names exactly the slug's? Only such a match is linked by a look-up by itself (25 Nov 2026). */
@@ -202,6 +228,14 @@ export function catalogueKey(name: string): string {
 const VALID_SLUG = SLUG;
 const asMatch = (i: CatalogueItem): CatalogueMatch => ({ slug: i.path.toLowerCase(), name: i.name, language: i.list === 'subbed' ? 'sub' : 'dub' });
 
+const WORDS = new WeakMap<CatalogueItem, string[]>();
+/** A catalogue entry's name as words, without its audio words; worked out once. */
+function catalogueWords(i: CatalogueItem): string[] {
+  let w = WORDS.get(i);
+  if (!w) { w = titleWords(i.name.replace(/\b(english|dubbed|subbed|dub|sub)\b/gi, ' ')); WORDS.set(i, w); }
+  return w;
+}
+
 /** Catalogue entries by normalised name and by normalised slug. Entries whose slug the map cannot open are left out. */
 export function indexCatalogue(items: CatalogueItem[]): Map<string, CatalogueItem[]> {
   const index = new Map<string, CatalogueItem[]>();
@@ -232,10 +266,19 @@ export function matchCatalogue(series: SeriesLike, index: Map<string, CatalogueI
   const exact = tidy(keys.flatMap((k) => index.get(k) ?? []));
   if (exact.length === 1) return { kind: 'exact', candidates: exact };
   if (exact.length > 1) return { kind: 'maybe', candidates: exact.slice(0, 8) };
-  const long = keys.filter((k) => k.length > 4);
+  // Near: one name starts with the other in whole words (26 Nov 2026: by letters "Magi" took "Magic Knight Rayearth").
+  const mine = [series.title, (series.titleSlug ?? '').replace(/-/g, ' '), ...(series.alternateTitles ?? []).map((a) => a.title)]
+    .map(titleWords).filter((w) => w.join('').length > 4);
+  const leads = (a: string[], b: string[]) => a.length <= b.length && a.every((w, i) => w === b[i]);
   const near: CatalogueItem[] = [];
-  for (const [k, list] of index) {
-    if (k.length > 4 && long.some((s) => k.startsWith(s) || s.startsWith(k))) near.push(...list);
+  const seenList = new Set<CatalogueItem[]>();
+  for (const list of index.values()) {
+    if (seenList.has(list)) continue;
+    seenList.add(list);
+    for (const i of list) {
+      const theirs = catalogueWords(i);
+      if (theirs.join('').length > 4 && mine.some((w) => leads(w, theirs) || leads(theirs, w))) near.push(i);
+    }
   }
   const maybe = tidy(near).slice(0, 8);
   return maybe.length ? { kind: 'maybe', candidates: maybe } : { kind: 'none', candidates: [] };
@@ -252,6 +295,44 @@ export function alternatives(series: SeriesLike, index: Map<string, CatalogueIte
   const heads = [...new Set(names.map((n) => n.replace(/\(.*?\)/g, ' ').split(/[\s:]+/).filter(Boolean).slice(0, 2).join(' ')))];
   return [...matchCatalogue(series, index).candidates, ...heads.flatMap((h) => searchCatalogue(items, h, 20))]
     .filter((m) => !taken.has(m.slug) && !seen.has(m.slug) && seen.add(m.slug)).slice(0, limit);
+}
+
+/** When each wcostream show was first seen in its list ("dubbed:mao" -> date), and when each list was first read. */
+export interface CatalogueSeen { since: { [list: string]: string }; shows: { [key: string]: string } }
+
+/**
+ * Note the shows not seen before and return them (26 Nov 2026: a new show on wcostream was only found by looking for
+ * it). A list's first read is where it starts: everything on it is known, none of it news. So is a flood: over `flood`
+ * unseen shows at once means the site renamed its pages, not that it added that many.
+ */
+export function noteSeen(seen: CatalogueSeen, items: CatalogueItem[], now: string, flood = 150): CatalogueItem[] {
+  const fresh: CatalogueItem[] = [];
+  for (const list of new Set(items.map((i) => i.list))) {
+    const first = !seen.since[list];
+    if (first) seen.since[list] = now;
+    const unseen = items.filter((i) => i.list === list && VALID_SLUG.test(i.path) && !seen.shows[`${list}:${i.path.toLowerCase()}`]);
+    const news = !first && unseen.length <= flood;
+    for (const i of unseen) {
+      seen.shows[`${list}:${i.path.toLowerCase()}`] = news ? now : seen.since[list];
+      if (news) fresh.push(i);
+    }
+  }
+  return fresh;
+}
+
+/** The shows first seen after their list's first read and within `days`, newest first. */
+export function newlySeen(seen: CatalogueSeen, items: CatalogueItem[], days: number, now = Date.now()): (CatalogueMatch & { list: CatalogueItem['list']; firstSeen: string })[] {
+  const from = new Date(now - days * 86400000).toISOString();
+  const out: (CatalogueMatch & { list: CatalogueItem['list']; firstSeen: string })[] = [];
+  const had = new Set<string>();
+  // Dubbed and cartoon entries first, so a show on both lists is shown once, as its dub.
+  for (const i of [...items].sort((a, b) => Number(a.list === 'subbed') - Number(b.list === 'subbed'))) {
+    const at = seen.shows[`${i.list}:${i.path.toLowerCase()}`];
+    if (!at || at <= (seen.since[i.list] ?? at) || at < from || had.has(i.path.toLowerCase())) continue;
+    had.add(i.path.toLowerCase());
+    out.push({ ...asMatch(i), list: i.list, firstSeen: at });
+  }
+  return out.sort((a, b) => b.firstSeen.localeCompare(a.firstSeen) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
 }
 
 /** Catalogue entries whose name contains every word of the query; dubbed and cartoon entries first. */

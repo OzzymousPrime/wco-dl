@@ -7,15 +7,18 @@
   // The screen opens on the rows that need a decision from you (several wcostream shows could be the one: pick it),
   // when there are any; "All" and the other states are one press away.
   // "Can't fill" (23 Nov 2026): linked shows with gaps that wcostream cannot supply, by reason, each with its fix.
-  const KINDS = [['maybe', 'Needs a decision'], ['stuck', 'Can’t fill'], ['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['none', 'No match']];
+  const KINDS = [['maybe', 'Needs a decision'], ['stuck', 'Can’t fill'], ['all', 'All'], ['following', 'Following'], ['linked', 'Linked, not followed'], ['ready', 'Ready to follow'], ['none', 'No match'], ['new', 'New on wcostream']];
   const kindOf = (r) => (r.state === 'exact' ? 'ready' : r.state);
   const stuck = (r) => !!r.slug && r.gaps > 0 && (!!r.linkWrong || !!r.resting || (r.onWco === 0 && !!r.gap));
   const inKind = (r, k) => k === 'all' || (k === 'stuck' ? stuck(r) : kindOf(r) === k);
   // The order the reasons are listed in: the ones a press fixes first.
   const REASONS = [['wrong', 'Linked to another show'], ['empty', 'Link lists nothing'], ['seasons', 'Seasons not on the page'], ['packaged', 'Not episodes on wcostream'],
-    ['different', 'Other episodes under these numbers'], ['stops', 'wcostream stops early'], ['resting', 'Videos refused, resting'], ['unlisted', 'Not listed']];
-  const reasonOf = (r) => (r.linkWrong ? 'wrong' : r.resting ? 'resting' : r.gap?.why || 'unlisted');
+    ['different', 'Other episodes under these numbers'], ['stops', 'wcostream stops early'], ['premium', 'Premium only on wcostream'], ['resting', 'Videos refused, resting'], ['unlisted', 'Not listed']];
+  const reasonOf = (r) => (r.linkWrong ? 'wrong' : r.resting ? (r.restWhy === 'premium' ? 'premium' : 'resting') : r.gap?.why || 'unlisted');
   let rows = [], drive = 'all', kind = 'all';
+  // New on wcostream (26 Nov 2026): the shows its lists gained lately, from GET /library/new; null until read.
+  let fresh = null;
+  const day = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
   async function api(method, url, body) {
     const r = await window.wcoBusy(url, fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }));
@@ -34,7 +37,7 @@
     const inDrive = rows.filter((r) => drive === 'all' || r.root === drive);
     const drives = [...new Set(rows.map((r) => r.root))];
     seg('drive', [['all', 'All folders'], ...drives.map((d) => [d, d])], drive);
-    seg('kind', KINDS.map(([v, label]) => [v, label, inDrive.filter((r) => inKind(r, v)).length]), kind);
+    seg('kind', KINDS.map(([v, label]) => [v, label, v === 'new' ? (fresh ? fresh.rows.length : undefined) : inDrive.filter((r) => inKind(r, v)).length]), kind);
     const f = $('filter').value.trim().toLowerCase();
     const list = inDrive.filter((r) => inKind(r, kind) && (!f || r.title.toLowerCase().includes(f)));
     const sum = (a, k) => a.reduce((n, r) => n + r[k], 0);
@@ -47,6 +50,7 @@
     const ready = readyRows();
     $('followall').hidden = !ready.length;
     $('followlabel').textContent = `Follow the ${ready.length} ready to follow${ready.length !== n('ready').length ? ' in this folder or filter' : ''}`;
+    if (kind === 'new') { $('rows').innerHTML = freshList(); return; }
     if (kind === 'stuck') {
       $('rows').innerHTML = list.length ? REASONS.map(([key, label]) => {
         const g = list.filter((r) => reasonOf(r) === key);
@@ -58,6 +62,45 @@
       const g = list.filter((r) => r.root === root);
       return `<h2 class="group"><code>${esc(root)}</code><span class="hint">${g.length} series · ${sum(g, 'gaps').toLocaleString('en-GB')} episodes missing</span></h2><ul class="lib">${g.map(row).join('')}</ul>`;
     }).join('') : '<p class="empty">Nothing here matches.</p>';
+  }
+
+  function freshList() {
+    if (!fresh) return '<p class="empty">Reading the lists on wcostream…</p>';
+    const f = $('filter').value.trim().toLowerCase();
+    const list = fresh.rows.filter((c) => !f || c.name.toLowerCase().includes(f));
+    if (!list.length) return `<p class="empty">${fresh.rows.length ? 'Nothing here matches.'
+      : `Nothing new on wcostream yet. Its lists have been watched since ${fresh.since ? day(fresh.since) : 'today'}: a show it adds appears here, and in the morning message.`}</p>`;
+    return `<h2 class="group">New on wcostream<span class="hint">${list.length} show${list.length === 1 ? '' : 's'} added in the last ${fresh.days} days</span></h2><ul class="lib">${list.map(freshRow).join('')}</ul>`;
+  }
+  function freshRow(c) {
+    const what = c.list === 'cartoon' ? 'Cartoon' : c.language === 'sub' ? 'Sub only' : 'Dubbed anime';
+    const map = `<a class="linkbtn" href="/map.html?url=${encodeURIComponent(c.slug)}">Open map</a>`;
+    const state = c.follow ? '<span class="tag ok">Following</span>' : c.series ? `<span>In Sonarr as ${esc(c.series.title)}</span>` : '<span>Not in Sonarr yet</span><span class="choices"></span>';
+    const acts = c.follow ? map : c.series ? `<button class="btn" data-newfollow type="button">${UI.icon('check')}Follow</button>${map}`
+      : `<button class="btn" data-newadd type="button" title="Sonarr adds the show of this name; it is then followed here">${UI.icon('plus')}Add to Sonarr and follow</button>`;
+    return `<li data-new="${esc(c.slug)}">${UI.poster(c.series ? c.series.id : '', c.series ? c.series.title : c.name)}<div class="name"><b title="${esc(c.name)}">${esc(c.name)}</b><span>${esc(c.slug)}</span></div>` +
+      `<div class="gaps">${what} <span>first seen ${day(c.firstSeen)}</span></div><div class="match">${state}</div><div class="acts">${acts}</div></li>`;
+  }
+  // Add a new show to Sonarr (several of the same name: pick one), then follow it; or follow one Sonarr already has.
+  async function freshAct(li, b) {
+    const c = fresh.rows.find((x) => x.slug === li.dataset.new); if (!c) return;
+    b.disabled = true;
+    try {
+      if (!c.series) {
+        const r = await api('POST', '/sonarr/add', { name: c.name, slug: c.slug, tvdbId: b.dataset.tvdb ? +b.dataset.tvdb : undefined });
+        if (!r.added && !r.already) {
+          li.querySelector('.choices').innerHTML = r.choices.length ? '<span class="hint">Which one?</span>' + r.choices.map((x) =>
+            `<button class="btn" type="button" data-newadd data-tvdb="${x.tvdbId}"${x.inSonarr ? ' disabled' : ''}>${UI.icon('plus')}${esc(x.title)} (${x.year || 'year unknown'})${x.network ? ' · ' + esc(x.network) : ''}${x.inSonarr ? ' · in Sonarr' : ''}</button>`).join('')
+            : '<span class="hint">Sonarr found no show by that name. Add it in Sonarr under the name it knows, then come back.</span>';
+          b.disabled = false; return;
+        }
+        c.series = r.series;
+      }
+      const res = await api('POST', '/links', { items: [{ slug: c.slug, seriesId: c.series.id, follow: true, language: c.language }] });
+      if (res.linked) { c.follow = true; toast(`Following ${c.series.title}: the overnight run fills it`); }
+      else toast(`Not followed: ${res.skipped[0]?.why || 'the link was refused'}`);
+      render();
+    } catch (e) { status(`Could not do that for ${c.name}: ${e.message}`, true); b.disabled = false; }
   }
 
   // What "Follow the n ready to follow" acts on: the ready rows of the folder and name filter in use, whichever state tab is open.
@@ -77,9 +120,9 @@
     const find = `<button class="linkbtn" data-find type="button">${r.state === 'none' ? 'Search wcostream' : 'Search for another'}</button>`;
     let match, acts;
     if (r.state === 'following' && kind === 'stuck') { match = fixes(r); acts = map(r.slug); }
-    else if (r.state === 'following') { match = `<span class="tag ok">Following</span><span>${esc(r.slug)} · ${r.language}</span>${gapTag(r)}`; acts = map(r.slug); }
+    else if (r.state === 'following') { match = `<span class="tag ok">Following</span><span>${esc(r.slug)} · ${r.language}</span>${gapTag(r)}${scope(r)}`; acts = map(r.slug); }
     else if (r.state === 'linked' && kind === 'stuck') { match = fixes(r); acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
-    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>${r.onWco === undefined ? '' : r.onWco ? `<span class="tag">${r.onWco} on wcostream</span>` : gapTag(r)}`; acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
+    else if (r.state === 'linked') { match = `<span>Linked: ${esc(r.slug)}</span>${r.onWco === undefined ? '' : r.onWco ? `<span class="tag">${r.onWco} on wcostream</span>` : gapTag(r)}${scope(r)}`; acts = `<button class="btn" data-follow type="button">${UI.icon('check')}Follow</button>${map(r.slug)}`; }
     else if (r.state === 'exact') {
       const c = r.candidates[0];
       match = `<span>${esc(c.name)}</span>${c.language === 'sub' ? '<span class="tag">sub only</span>' : ''}${find}`;
@@ -94,6 +137,14 @@
       `${(r.split || []).length ? ` <span class="tag" title="Also in a folder Sonarr does not track: ${esc(r.split.join(', '))}. Some of the missing episodes may be there.">split</span>` : ''}</div><div class="match">${match}</div><div class="acts">${acts}</div></li>`;
   }
 
+  // A link that is one season (or one part) of its series says so, and offers the other pages wcostream has for the series
+  // (26 Nov 2026: Bleach was linked only through the page of its 17th season, so 170 episodes to dub had nowhere to come from).
+  function scope(r) {
+    if (!r.season && !r.part) return '';
+    const more = (r.candidates || []).map((c) => `<button class="btn" data-also="${esc(c.slug)}" data-lang="${c.language}" type="button" title="Follow ${esc(c.name)} for ${esc(r.title)} too, beside ${esc(r.slug)}">${UI.icon('plus')}Also follow ${esc(c.name)}${c.language === 'sub' ? ' (sub only)' : ''}</button>`).join('');
+    return `<span class="tag" title="This wcostream page is ${r.season ? `Sonarr season ${r.season}` : 'one part of the series'}; the rest comes from other pages">${r.season ? `season ${r.season} only` : 'part of the series'}</span>${more}`;
+  }
+
   // The reason tag for a linked row with none of its gaps on wcostream.
   function gapTag(r) {
     if (r.onWco !== 0 || r.linkWrong) return '';
@@ -105,7 +156,8 @@
   function fixes(r) {
     const why = reasonOf(r), g = UI.gapWords(r.gap);
     const cap = (t) => t.replace(/^./, (c) => c.toUpperCase());
-    const text = why === 'wrong' ? `The link ${r.slug} looks like another show: ${r.linkWrong}.` : why === 'resting'
+    const text = why === 'wrong' ? `The link ${r.slug} looks like another show: ${r.linkWrong}.` : why === 'premium'
+      ? `wcostream keeps this show for its paying members, so it cannot be fetched from there; its missing episodes went to Sonarr. Asked again after ${day(r.resting)}.` : why === 'resting'
       ? `wcostream's video server refuses this show; its missing episodes went to Sonarr. Tried again after ${new Date(r.resting).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}.`
       : g ? g.why.replace(/ from Library gaps/g, ' here').replace(/Relink it here/, 'Relink it below') : '';
     const out = [`<span class="fixwhy">${esc(text)}</span>`];
@@ -122,7 +174,7 @@
     }
     if (why === 'packaged') out.push(`<button class="btn" data-handoff type="button" title="Sonarr searches for the missing episodes; the show is no longer followed here">${UI.icon('next')}Hand to Sonarr</button>`);
     if ((r.notDubbed || []).length) out.push(`<span class="hint">${esc(cap(UI.seasonList(r.notDubbed)))} marked never dubbed.</span><button class="linkbtn" data-nodubundo type="button">Count again</button>`);
-    if ((r.pages || []).length) out.push(`<span class="hint">${r.pages.map((p) => `Season ${p.season} from ${esc(p.slug)}`).join(', ')}.</span>`);
+    if ((r.pages || []).length) out.push(`<span class="hint">${r.pages.map((p) => `${p.season ? `Season ${p.season}` : 'Part'} from ${esc(p.slug)}`).join(', ')}.</span>`);
     return out.join('');
   }
 
@@ -144,6 +196,8 @@
   }
 
   $('rows').addEventListener('click', async (ev) => {
+    const nli = ev.target.closest('li[data-new]');
+    if (nli) { const b = ev.target.closest('[data-newadd], [data-newfollow]'); if (b && !b.disabled) await freshAct(nli, b); return; }
     const li = ev.target.closest('li[data-id]'); if (!li) return;
     const r = rows.find((x) => x.id === +li.dataset.id);
     if (ev.target.closest('[data-follow]')) {
@@ -156,6 +210,15 @@
       const m = li.querySelector('.match');
       m.innerHTML = `<input type="search" placeholder="Search wcostream by name" aria-label="Search wcostream for ${esc(r.title)}" value="${esc(r.title.replace(/\s*\(.*?\)\s*/g, ' ').trim())}"><div class="found"></div>`;
       const input = m.querySelector('input'); input.focus(); input.select(); search(input, r);
+      return;
+    }
+    const also = ev.target.closest('[data-also]');
+    if (also) {
+      try {
+        const res = await api('POST', '/links', { items: [{ slug: also.dataset.also, seriesId: r.id, follow: true, language: also.dataset.lang }] });
+        toast(res.linked ? `${also.dataset.also} is followed for ${r.title} as well` : `Not linked: ${res.skipped[0]?.why || 'refused'}`);
+        setTimeout(reload, 3000);
+      } catch (e) { status(`Could not link that page: ${e.message}`, true); }
       return;
     }
     const relink = ev.target.closest('[data-relink]');
@@ -246,6 +309,7 @@
       try { const k = new URLSearchParams(location.search).get('kind'); if (KINDS.some(([v]) => v === k)) kind = k; } catch { /* the default stays */ }
       status(data.catalogueErrors.length ? `Part of wcostream's catalogue could not be read, so some matches are missing (${data.catalogueErrors.join('; ')}). Reload to try again.` : '', data.catalogueErrors.length > 0);
       $('lib').hidden = false; render();
+      api('GET', '/library/new').then((d) => { fresh = d; render(); }).catch(() => { fresh = { rows: [], days: 60 }; render(); });
     } catch (e) { status(`Could not read the library: ${e.message}`, true); }
   })();
 })();

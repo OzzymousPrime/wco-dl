@@ -1,5 +1,9 @@
 import {
   alternatives,
+  matchCatalogue,
+  newlySeen,
+  noteSeen,
+  seasonNamed,
   namedAs,
   titleWords,
   dubVerdict,
@@ -185,5 +189,72 @@ describe('partial names match in whole words', () => {
   it('reads words the way names are compared', () => {
     expect(titleWords("Captain Thimble's Tugboat (2012)")).toEqual(['captain', 'thimbles', 'tugboat']);
     expect(titleWords('Mao 2099')).toEqual(['mao', '2099']);
+  });
+});
+
+// 26 Nov 2026: wcostream's "Bleach: Thousand-Year Blood War" was linked to all of Bleach, so its episode 1 was 1x01.
+describe('a wcostream show that is one season of a Sonarr series', () => {
+  const bleach = { id: 1041, title: 'Bleach', titleSlug: 'bleach', seasons: [{ seasonNumber: 0 }, { seasonNumber: 1 }, { seasonNumber: 17 }],
+    alternateTitles: [{ title: 'Bleach: Thousand-Year Blood War', sceneSeasonNumber: 17 }, { title: 'Bleach Sennen Kessen-hen', sceneSeasonNumber: 17 },
+      { title: 'Bleach', seasonNumber: -1 }] };
+  it('reads the season from the name Sonarr keeps for it', () => {
+    expect(seasonNamed('bleach-thousand-year-blood-war', bleach)).toBe(17);
+    expect(seasonNamed('bleach-sennen-kessen-hen-english-subbed', bleach)).toBe(17);
+  });
+  it("is the whole series under the series' own name, or a name for all of it", () => {
+    expect(seasonNamed('bleach', bleach)).toBeUndefined();
+    expect(seasonNamed('burichi', { ...bleach, alternateTitles: [{ title: 'Burichi', seasonNumber: -1 }] })).toBeUndefined();
+    expect(seasonNamed('something-else', bleach)).toBeUndefined();
+  });
+  it('leaves a single-season series, a season Sonarr does not have, and a name for two seasons alone', () => {
+    const one = { id: 1, title: 'Digimon Adventure: (2020)', seasons: [{ seasonNumber: 1 }], alternateTitles: [{ title: 'Digimon Adventure:', seasonNumber: 1 }] };
+    expect(seasonNamed('digimon-adventure', one)).toBeUndefined();
+    expect(seasonNamed('bleach-thousand-year-blood-war', { ...bleach, seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }] })).toBeUndefined();
+    expect(seasonNamed('show-x', { id: 2, title: 'Show', seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }],
+      alternateTitles: [{ title: 'Show X', sceneSeasonNumber: 1 }, { title: 'Show X', sceneSeasonNumber: 2 }] })).toBeUndefined();
+  });
+});
+
+describe('a series is offered wcostream shows in whole words', () => {
+  const items = [
+    { name: 'Magic Knight Rayearth (2026)', path: 'magic-knight-rayearth-2026', list: 'dubbed' as const },
+    { name: 'Kaijudo: Rise of the Duel Masters', path: 'kaijudo-rise-of-the-duel-masters', list: 'cartoon' as const },
+    { name: 'Kaiju No. 8', path: 'kaiju-no-8', list: 'dubbed' as const },
+    { name: 'Paw Patrol', path: 'paw-patrol', list: 'cartoon' as const },
+  ];
+  const index = indexCatalogue(items);
+  it('"Kaiju" is offered "Kaiju No. 8", not "Kaijudo"; "Magic" is not "Magi"', () => {
+    expect(matchCatalogue({ id: 1, title: 'Kaiju' }, index).candidates.map((c) => c.slug)).toEqual(['kaiju-no-8']);
+    expect(matchCatalogue({ id: 3, title: 'Magic Knight' }, index).candidates.map((c) => c.slug)).toEqual(['magic-knight-rayearth-2026']);
+    expect(matchCatalogue({ id: 4, title: 'Magical' }, index).candidates).toEqual([]);
+  });
+  it('still offers a show whose name starts another', () => {
+    expect(matchCatalogue({ id: 2, title: 'Paw Patrol: The Mighty Pups' }, index)).toMatchObject({ kind: 'maybe', candidates: [{ slug: 'paw-patrol' }] });
+  });
+});
+
+describe('new on wcostream (26 Nov 2026)', () => {
+  const show = (path: string, list: 'dubbed' | 'cartoon' | 'subbed' = 'dubbed') => ({ name: path.replace(/-/g, ' '), path, list });
+  it('takes the first read of a list as known, and tells what is added after', () => {
+    const seen = { since: {}, shows: {} };
+    expect(noteSeen(seen, [show('bleach'), show('mao')], '2026-11-26T01:00:00.000Z')).toEqual([]);
+    expect(noteSeen(seen, [show('bleach'), show('mao'), show('new-one')], '2026-11-27T01:00:00.000Z').map((i) => i.path)).toEqual(['new-one']);
+    expect(noteSeen(seen, [show('bleach'), show('mao'), show('new-one')], '2026-11-28T01:00:00.000Z')).toEqual([]);
+    const rows = newlySeen(seen, [show('bleach'), show('mao'), show('new-one')], 30, Date.parse('2026-11-29T00:00:00Z'));
+    expect(rows).toEqual([expect.objectContaining({ slug: 'new-one', language: 'dub', firstSeen: '2026-11-27T01:00:00.000Z' })]);
+    expect(newlySeen(seen, [show('new-one')], 30, Date.parse('2027-02-01T00:00:00Z'))).toEqual([]);     // too long ago
+  });
+  it('a list read for the first time later starts there; a dub of a known sub is news', () => {
+    const seen = { since: {}, shows: {} };
+    noteSeen(seen, [show('mao', 'subbed')], '2026-11-26T01:00:00.000Z');
+    expect(noteSeen(seen, [show('mao', 'subbed'), show('mao'), show('bleach')], '2026-11-27T01:00:00.000Z')).toEqual([]);     // the dubbed list's first read
+    expect(noteSeen(seen, [show('mao', 'subbed'), show('mao'), show('bleach'), show('gintama')], '2026-11-28T01:00:00.000Z').map((i) => i.path)).toEqual(['gintama']);
+  });
+  it('a flood of unseen shows is the site renaming its pages, not news', () => {
+    const seen = { since: {}, shows: {} };
+    noteSeen(seen, [show('a-show')], '2026-11-26T01:00:00.000Z');
+    const many = Array.from({ length: 200 }, (_, i) => show(`renamed-${i}`));
+    expect(noteSeen(seen, many, '2026-11-27T01:00:00.000Z')).toEqual([]);
+    expect(newlySeen(seen, many, 30, Date.parse('2026-11-28T00:00:00Z'))).toEqual([]);
   });
 });

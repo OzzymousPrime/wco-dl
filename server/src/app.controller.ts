@@ -136,7 +136,15 @@ export class AppController {
       if (r.status === 'fulfilled') items.push(...r.value.filter((x) => x.kind === 'series').map((x) => ({ name: x.name, path: x.path, list: lists[i] })));
       else errors.push(`${lists[i]} list: ${(r.reason as Error)?.message ?? 'no answer'}`);
     });
+    await this.fillService.noteCatalogue(items);
     return { items, errors };
+  }
+
+  /** New on wcostream (26 Nov 2026): the shows its lists gained in the last `days`, with whether each is in Sonarr. */
+  @Get('library/new')
+  async libraryNew(@Query('days') days?: string) {
+    const { items, errors } = await this.catalogue();
+    return { catalogueErrors: errors, ...(await this.fillService.newOnWco(items, days ? Number(days) : undefined)) };
   }
 
   @Get('library/gaps')

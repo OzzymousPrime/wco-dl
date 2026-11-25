@@ -7,8 +7,12 @@ import { APP_CONFIG } from './app-config.provider';
 import { AppConfig } from './config';
 import { AppService } from './app.service';
 import { buildListing, parseEpisodeLinks, WcoListing } from './wco-episodes.util';
+import { CatalogueItem } from './fill.util';
 
 const TTL_MS = 6 * 60 * 60 * 1000;
+/** A page that listed nothing is read again after this long (26 Nov 2026: Digimon Tamers came back empty once and was "0 on wcostream" for six hours and the nights that followed). */
+const EMPTY_TTL_MS = 30 * 60 * 1000;
+const keepFor = (l: WcoListing) => (l.count ? TTL_MS : EMPTY_TTL_MS);
 const SHOW = 'https://www.wcostream.tv/anime/';
 
 @Injectable()
@@ -45,6 +49,19 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
     this.saveTimer.unref?.();
   }
 
+  /** The series on wcostream's dubbed, cartoon and subbed lists; a list that cannot be read is named in `errors`. */
+  async catalogue(): Promise<{ items: CatalogueItem[]; errors: string[] }> {
+    const lists = ['dubbed', 'cartoon', 'subbed'] as const;
+    const got = await Promise.allSettled(lists.map((l) => this.app.getContentList(l)));
+    const items: CatalogueItem[] = [];
+    const errors: string[] = [];
+    got.forEach((r, i) => {
+      if (r.status === 'fulfilled') items.push(...r.value.filter((x) => x.kind === 'series').map((x) => ({ name: x.name, path: x.path, list: lists[i] })));
+      else errors.push(`${lists[i]} list: ${(r.reason as Error)?.message ?? 'no answer'}`);
+    });
+    return { items, errors };
+  }
+
   /** The cached listing, or undefined when it has not been read (or could not be). */
   /** How reads from wcostream are going; undefined in tests that build the service by hand. */
   get health() { return this.app?.health; }
@@ -54,7 +71,7 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
 
   peek(slug: string, language: string): WcoListing | undefined {
     const hit = this.cache.get(`${slug}|${language}`);
-    return hit && Date.now() - hit.at < TTL_MS ? hit.listing : undefined;
+    return hit && Date.now() - hit.at < keepFor(hit.listing) ? hit.listing : undefined;
   }
 
   /**
@@ -93,6 +110,12 @@ export class WcoEpisodesService implements OnApplicationBootstrap {
         const listing = buildListing(parseEpisodeLinks(html, url, language));
         if (listing.count > 0) this.parserWorks = true;
         this.app.health?.record(listing.count > 0 ? 'ok' : 'empty', slug);
+        // A page that listed episodes a moment ago does not lose them on one empty read: kept, and read again soon.
+        const old = this.cache.get(key);
+        if (!listing.count && old?.listing.count) {
+          this.cache.set(key, { at: Date.now() - TTL_MS + EMPTY_TTL_MS, listing: old.listing });
+          return old.listing;
+        }
         this.cache.set(key, { at: Date.now(), listing });
         this.saveSoon();
         return listing.count === 0 && !this.parserWorks ? undefined : listing;

@@ -1216,3 +1216,21 @@ describe('a listen to an unlabelled file (23 Nov 2026)', () => {
     expect(heardVerdict(undefined, 10)).toBeUndefined();
   });
 });
+
+// 26 Nov 2026: Pokémon is one Sonarr series; wcostream has a show per English season, cut at other places.
+describe('a page that carries part of a series', () => {
+  const { markPart } = require('./fill.service');
+  const map = [
+    { id: 1, st: 'missing' }, { id: 2, st: 'missing' }, { id: 3, st: 'undub' }, { id: 4, st: 'dub' }, { id: 5, st: 'future' }, { id: 6, st: 'missing' },
+  ];
+  const sources = new Map<number, { kind: string }>([[1, { kind: 'title' }], [2, { kind: 'number' }], [3, { kind: 'none' }], [6, { kind: 'title' }]]);
+  it('owns only what its page has by title when it is not one season', () => {
+    expect(markPart(map, sources, true).map((e: any) => e.st)).toEqual(['missing', 'elsewhere', 'elsewhere', 'dub', 'future', 'missing']);
+  });
+  it('owns what its page lists by number too inside a season', () => {
+    expect(markPart(map, sources, false).map((e: any) => e.st)).toEqual(['missing', 'missing', 'elsewhere', 'dub', 'future', 'missing']);
+  });
+  it('owns nothing while the page cannot be read', () => {
+    expect(markPart(map, undefined, true).filter((e: any) => e.st === 'missing')).toEqual([]);
+  });
+});

@@ -23,7 +23,7 @@
   const FILL_LABEL = { queued: 'queue', importing: 'import', done: 'done', premium: 'Sonarr', kept: 'check', failed: 'fail', cancelled: '' };
   const ACTIVE = ['queued', 'downloading', 'importing'];
   const STATE_WORDS = { dub: 'in library, English audio', undub: 'in library, another language only', unknown: 'in library, audio not labelled', missing: 'missing', future: 'not aired yet',
-    nodub: 'season never dubbed, not counted', elsewhere: 'left to its own season page' };
+    nodub: 'season never dubbed, not counted', elsewhere: 'left to another wcostream page of this series' };
 
   let show = null, eps = [], fills = new Map(), confirmSwap = false;
   const sel = new Set(), open = new Set();
@@ -284,6 +284,9 @@
   function setSeasonPick() {
     $('noswaplabel').hidden = !show?.series;
     $('noswap').checked = !!show?.noSwap;
+    // "Only part of the series is on this page" (26 Nov 2026): offered where the series has more than one season.
+    $('partlabel').hidden = !show?.series || ((show?.seasons || []).filter((n) => n > 0).length < 2 && !show.part);
+    $('part').checked = !!show?.part;
     const seasons = (show?.seasons || []).filter((n) => n > 0);
     $('seasonpick').hidden = !show?.series || (seasons.length < 2 && !show.season);
     $('numbering').hidden = !!show?.season;
@@ -299,6 +302,19 @@
       await openShow(link, { push: false });
     } catch (e) { status(`Could not change it: ${e.message}`, true); }
     $('seasonsel').disabled = false;
+  });
+
+  $('part').addEventListener('change', async () => {
+    if (!show?.series) return;
+    const part = $('part').checked;
+    $('part').disabled = true;
+    try {
+      const r = await api('POST', '/links', { items: [{ slug: show.slug, seriesId: show.series.id, part }] });
+      if (!r.linked) throw new Error(r.skipped[0]?.why || 'the link was refused');
+      toast(part ? 'This link now fetches only the episodes this page has; the rest is left to the other pages of the series' : 'This link covers the whole series again');
+      await openShow(link, { push: false });
+    } catch (e) { $('part').checked = !part; status(`Could not change it: ${e.message}`, true); }
+    $('part').disabled = false;
   });
 
   function setSeg(id, v) { $(id).querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
@@ -441,7 +457,7 @@
     const count = (s) => eps.filter((e) => e.st === s).length;
     $('tally').innerHTML = `<span><b>${count('dub')}</b> in English</span><span><b>${count('undub')}</b> not in English</span>${count('unknown') ? `<span><b>${count('unknown')}</b> audio not labelled</span>` : ''}<span><b>${count('missing')}</b> missing</span>` +
       (count('future') ? `<span><b>${count('future')}</b> not aired</span>` : '') +
-      (count('nodub') ? `<span><b>${count('nodub')}</b> never dubbed</span>` : '') + (count('elsewhere') ? `<span><b>${count('elsewhere')}</b> on a season page</span>` : '');
+      (count('nodub') ? `<span><b>${count('nodub')}</b> never dubbed</span>` : '') + (count('elsewhere') ? `<span><b>${count('elsewhere')}</b> ${show?.part ? 'not on this page' : 'on a season page'}</span>` : '');
     const map = $('map'); map.innerHTML = '';
     if (!eps.length) { map.innerHTML = '<p class="empty">Sonarr has no episodes for this show yet.</p>'; render(); return; }
     for (const s of [...new Set(eps.map((e) => e.s))]) {
